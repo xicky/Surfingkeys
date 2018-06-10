@@ -221,6 +221,19 @@ var Omnibar = (function() {
         }
     });
 
+    self.mappings.add(KeyboardUtils.encodeKeystroke("<Ctrl-u>"), {
+        annotation: "Delete to start",
+        feature_group: 8,
+        code: function () {
+            if (self.input) {
+                var val = self.input.value;
+                val = val.substring(self.input.selectionStart);
+                self.input.value = val;
+                self.input.selectionStart = self.input.selectionEnd = 0;
+            }
+        }
+    });
+
     self.mappings.add(KeyboardUtils.encodeKeystroke("<Esc>"), {
         annotation: "Close Omnibar",
         feature_group: 8,
@@ -248,6 +261,18 @@ var Omnibar = (function() {
     ui.onclick = function() {
         self.input.focus();
     };
+
+    self.mappings.add(KeyboardUtils.encodeKeystroke("<Ctrl-g>"), {
+        annotation: "Toggle default search engine",
+        feature_group: 8,
+        code: function () {
+            if (handler === SearchEngine) {
+                self.collapseAlias();
+            } else {
+                self.expandAlias(runtime.conf.defaultSearchEngine, self.input.value);
+            }
+        }
+    });
 
     self.triggerInput = function() {
         var event = new Event('input', {
@@ -279,13 +304,10 @@ var Omnibar = (function() {
 
     self.collapseAlias = function() {
         var eaten = false, val = self.input.value;
-        if (lastHandler && handler !== lastHandler && (val === self.collapsingPoint || val === "")) {
+        if (lastHandler && handler !== lastHandler) {
             handler = lastHandler;
             lastHandler = null;
             setInnerHTML(self.promptSpan, handler.prompt);
-            if (val.length) {
-                self.input.value = val.substr(0, val.length - 1);
-            }
             Omnibar.triggerInput();
             eaten = true;
         }
@@ -345,7 +367,8 @@ var Omnibar = (function() {
         } else if (evt.keyCode === KeyboardUtils.keyCodes.space) {
             self.expandAlias(self.input.value, '') && evt.preventDefault();
         } else if (evt.keyCode === KeyboardUtils.keyCodes.backspace) {
-            self.collapseAlias() && evt.preventDefault();
+            // prefer manual switch using [Ctrl-g]
+            //self.collapseAlias() && evt.preventDefault();
         }
     }
     self.input.oninput = _onIput;
@@ -537,7 +560,7 @@ var Omnibar = (function() {
             url = fi.url;
         } else {
             url = self.input.value;
-            if (url.indexOf(':') === -1) {
+            if (!isURL(url)) {
                 url = SearchEngine.aliases[runtime.conf.defaultSearchEngine].url + url;
             }
         }
@@ -979,7 +1002,9 @@ var OpenURLs = (function() {
             var val = Omnibar.input.value;
             var filtered = _filterByTitleOrUrl(cached, val);
             if (filtered.length === 0) {
-                Omnibar.expandAlias(runtime.conf.defaultSearchEngine, val);
+                // prefer manual switching [Ctrl-g] to auto switching
+                // Omnibar.expandAlias(runtime.conf.defaultSearchEngine, val);
+                Omnibar.listURLs(filtered, false);
             } else {
                 Omnibar.detectAndInsertURLItem(val, filtered);
                 Omnibar.listURLs(filtered, false);

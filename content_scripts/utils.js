@@ -326,6 +326,53 @@ function getAnnotations(mappings) {
     });
 }
 
+// isURL function is copied from vimium [https://github.com/philc/vimium/blob/master/lib/utils.coffee]
+var isURL = (function() {
+    var urlPrefix = new RegExp("^[a-z][-+.a-z0-9]{2,}://.");
+    var urlRegex = new RegExp(
+        "^(?:([^:]+)(?::([^:]+))?@)?" + // user:password (optional) => \1, \2
+        "([^:]+|\\[[^\\]]+\\])"       + // host name (IPv6 addresses in square brackets allowed) => \3
+        "(?::(\\d+))?$"                 // port number (optional) => \4
+    );
+    var ipv4Regex = /^(\d{1,3}\.){3}\d{1,3}$/;
+
+    // Official ASCII TLDs that are longer than 3 characters + inofficial.onion TLD used by TOR
+    var longTlds = ["arpa", "asia", "coop", "info", "jobs", "local", "mobi", "museum", "name", "onion"];
+
+    var specialHostNames = ["localhost"];
+
+    return function(str) {
+        if (str.indexOf(' ') > 0) {
+            return false;
+        }
+
+        if (urlPrefix.test(str)) {
+            return true;
+        }
+
+        var match = urlRegex.exec(str.split("/")[0]);
+        if (!match) return false;
+
+        var hostName = match[3];
+        if (specialHostNames.indexOf(hostName) >= 0) return true;
+        if (hostName.indexOf(":") >= 0) return true;
+
+        var dottedParts = hostName.split(".");
+        if (dottedParts.length > 1) {
+            var last = dottedParts[dottedParts.length - 1];
+            if (last.length >= 2 && last.length <= 3 || longTlds.indexOf(last) >= 0) {
+                return true;
+            }
+        }
+
+        if (ipv4Regex.test(hostName)) {
+            return true;
+        }
+
+        return false;
+    };
+})();
+
 function constructSearchURL(se, word) {
     if (se.indexOf("{0}") > 0) {
         return se.format(word);
