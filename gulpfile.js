@@ -68,7 +68,7 @@ gulp.task('copy-es-files', function() {
     ], {base: "."})
         .pipe(gulpif(options.env === 'development', sourcemaps.init()))
         .pipe(babel({presets: ['es2015']}))
-        .pipe(gp_uglify().on('error', gulpUtil.log))
+        .pipe(gulpif(!options.nominify, gp_uglify().on('error', gulpUtil.log)))
         .pipe(gulpif(options.env === 'development', sourcemaps.write('.')))
         .pipe(gulp.dest(`dist/${buildTarget}-extension`));
 });
@@ -76,11 +76,12 @@ gulp.task('copy-es-files', function() {
 gulp.task('copy-js-files', gulp.series('copy-es-files', function() {
     var libs = [
         'libs/ace/*.js',
-        'pages/pdf/*.js'
+        'pages/pdf/*.js',
+        'libs/webfontloader.js'
     ];
     return gulp.src(libs, {base: "."})
         .pipe(gulpif(options.env === 'development', sourcemaps.init()))
-        .pipe(gp_uglify().on('error', gulpUtil.log))
+        .pipe(gulpif(!options.nominify, gp_uglify().on('error', gulpUtil.log)))
         .pipe(gulpif(options.env === 'development', sourcemaps.write('.')))
         .pipe(gulp.dest(`dist/${buildTarget}-extension`));
 }));
@@ -104,7 +105,7 @@ gulp.task('build_background', function() {
         .pipe(gulpif(options.env === 'development', sourcemaps.init()))
         .pipe(gp_concat('background.js'))
         .pipe(babel({presets: ['es2015']}))
-        .pipe(gp_uglify().on('error', gulpUtil.log))
+        .pipe(gulpif(!options.nominify, gp_uglify().on('error', gulpUtil.log)))
         .pipe(gulpif(options.env === 'development', sourcemaps.write('.')))
         .pipe(gulp.dest(`dist/${buildTarget}-extension`));
 });
@@ -131,7 +132,7 @@ gulp.task('build_common_content_min', function() {
         .pipe(gulpif(options.env === 'development', sourcemaps.init()))
         .pipe(gp_concat('common_content.min.js'))
         .pipe(babel({presets: ['es2015']}))
-        .pipe(gp_uglify().on('error', gulpUtil.log))
+        .pipe(gulpif(!options.nominify, gp_uglify().on('error', gulpUtil.log)))
         .pipe(gulpif(options.env === 'development', sourcemaps.write('.')))
         .pipe(gulp.dest(`dist/${buildTarget}-extension/content_scripts`));
 });

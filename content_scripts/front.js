@@ -60,6 +60,10 @@ var Front = (function() {
 
     var _actions = {};
 
+    self.registerAction = function(action, cb) {
+        _actions[action] = cb;
+    };
+
     _actions["getSearchSuggestions"] = function (message) {
         var ret = null;
         if (_listSuggestions.hasOwnProperty(message.url)) {
@@ -96,9 +100,18 @@ var Front = (function() {
         });
     };
 
+    var frameElement = createElement('<div id=sk_frame>');
     self.highlightElement = function (sn) {
-        sn.action = 'highlightElement';
-        frontendCommand(sn);
+        document.body.append(frameElement);
+        var rect = sn.rect;
+        frameElement.style.top = rect.top + "px";
+        frameElement.style.left = rect.left + "px";
+        frameElement.style.width = rect.width + "px";
+        frameElement.style.height = rect.height + "px";
+        frameElement.style.display = "";
+        setTimeout(function() {
+            frameElement.remove();
+        }, sn.duration);
     };
 
     function getAllAnnotations() {
@@ -164,7 +177,7 @@ var Front = (function() {
                 if (n.value === selected) {
                     initial_line = i;
                 }
-                return n.innerText + " >< " + n.value;
+                return n.innerText.trim() + " >< " + n.value;
             }).join('\n');
             elementBehindEditor = element;
         } else {
@@ -199,24 +212,33 @@ var Front = (function() {
         frontendCommand(args);
     };
 
-    var onOmniQuery;
-    self.openOmniquery = function(args) {
-        onOmniQuery = function(query) {
+    var _inlineQuery;
+    var _showQueryResult;
+    self.performInlineQuery = function (query, showQueryResult) {
+        if (_inlineQuery) {
+            query = query.toLocaleLowerCase();
             httpRequest({
-                'url': (typeof(args.url) === "function") ? args.url(query) : args.url + query
+                url: (typeof(_inlineQuery.url) === "function") ? _inlineQuery.url(query) : _inlineQuery.url + query,
+                headers: _inlineQuery.headers
             }, function(res) {
-                var words = args.parseResult(res);
-
-                if (window.navigator.userAgent.indexOf("Firefox") === -1) {
-                    words.push(Visual.findSentenceOf(query));
-                }
-
-                frontendCommand({
-                    action: 'updateOmnibarResult',
-                    words: words
-                });
+                showQueryResult(_inlineQuery.parseResult(res));
             });
-        };
+        } else if (Front.isProvider()) {
+            _showQueryResult = showQueryResult;
+            document.getElementById("proxyFrame").contentWindow.postMessage({
+                action: "performInlineQuery",
+                query: query
+            }, "*");
+        } else {
+            tabOpenLink("https://github.com/brookhong/Surfingkeys/wiki/Register-inline-query");
+            self.hidePopup();
+        }
+    };
+
+    self.registerInlineQuery = function(args) {
+        _inlineQuery = args;
+    };
+    self.openOmniquery = function(args) {
         self.openOmnibar(({type: "OmniQuery", extra: args.query, style: args.style}));
     };
 
@@ -234,12 +256,23 @@ var Front = (function() {
         });
     };
 
-    self.showBubble = function(pos, msg) {
-        frontendCommand({
-            action: "showBubble",
-            content: msg,
-            position: pos
-        });
+    self.showBubble = function(pos, msg, noPointerEvents) {
+        if (msg.length > 0) {
+            pos.winWidth = window.innerWidth;
+            pos.winHeight = window.innerHeight;
+            pos.winX = 0;
+            pos.winY = 0;
+            if (window.frameElement) {
+                pos.winX = window.frameElement.offsetLeft;
+                pos.winY = window.frameElement.offsetTop;
+            }
+            frontendCommand({
+                action: "showBubble",
+                content: msg,
+                position: pos,
+                noPointerEvents: noPointerEvents
+            });
+        }
     };
 
     self.hideBubble = function() {
@@ -299,6 +332,14 @@ var Front = (function() {
         });
     };
 
+    self.getFrameId = function () {
+        if (document.body.offsetWidth && document.body.offsetHeight && document.body.innerText
+            && !window.frameId) {
+            window.frameId = generateQuickGuid();
+        }
+        return window.frameId;
+    };
+
     _actions["ace_editor_saved"] = function(response) {
         if (response.data !== undefined) {
             onEditorSaved(response.data);
@@ -326,7 +367,22 @@ var Front = (function() {
     _actions["omnibar_query_entered"] = function(response) {
         readText(response.query);
         runtime.updateHistory('OmniQuery', response.query);
-        onOmniQuery(response.query);
+        self.performInlineQuery(response.query, function(queryResult) {
+            if (queryResult.constructor.name !== "Array") {
+                queryResult = [queryResult];
+            }
+            if (window.navigator.userAgent.indexOf("Firefox") === -1) {
+                var sentence = Visual.findSentenceOf(response.query);
+                if (sentence.length > 0) {
+                    queryResult.push(sentence);
+                }
+            }
+
+            frontendCommand({
+                action: 'updateOmnibarResult',
+                words: queryResult
+            });
+        });
     };
 
     _actions["executeScript"] = function(message) {
@@ -396,7 +452,7 @@ var Front = (function() {
         if (msg.frameId === window.frameId) {
             window.focus();
             scrollIntoViewIfNeeded(document.body);
-            var rc = (window.frameElement || document.body).getBoundingClientRect();
+            var rc = document.body.getBoundingClientRect();
             self.highlightElement({
                 duration: 500,
                 rect: {
@@ -412,9 +468,24 @@ var Front = (function() {
         }
     };
 
-    window.addEventListener('message', function(event) {
+    document.addEventListener('DOMContentLoaded', function (e) {
+        if (window.location.href.indexOf(chrome.extension.getURL("/pages/pdf_viewer.html")) === 0) {
+            document.getElementById("proxyFrame").src = window.location.search.substr(3);
+        }
+    });
+
+    window.addEventListener('message', function (event) {
         var _message = event.data;
-        if (_active) {
+        if (_message.action === "performInlineQuery") {
+            self.performInlineQuery(_message.query, function (queryResult) {
+                event.source.postMessage({
+                    action: "performInlineQueryResult",
+                    result: queryResult
+                }, event.origin);
+            });
+        } else if (_message.action === "performInlineQueryResult") {
+            _showQueryResult(_message.result);
+        } else if (_active) {
             if (_message.responseToContent && _callbacks[_message.id]) {
                 var f = _callbacks[_message.id];
                 // returns true to make callback stay for coming response.

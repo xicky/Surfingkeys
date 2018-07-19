@@ -297,39 +297,8 @@ mapkey('ox', '#8Open recently closed URL', function() {
 mapkey('H', '#8Open opened URL in current tab', function() {
     Front.openOmnibar({type: "URLs", extra: "getTabURLs"});
 });
-function renderShanbay(res) {
-    var exp = res.msg;
-    if (res.data.definition) {
-        var tmp = [];
-        for (var reg in res.data.pronunciations) {
-            tmp.push('<div>[{0}] {1}</div>'.format(reg, res.data.pronunciations[reg]));
-            tmp.push('<div><audio src="{0}" controls></audio></div>'.format(res.data[reg+'_audio']));
-        }
-        tmp.push('<div>{0}</div>'.format(res.data.definition));
-        exp = '<div>{0}</div>'.format(tmp.join('\n'));
-    }
-    return exp;
-}
 mapkey('Q', '#8Open omnibar for word translation', function() {
-    Front.openOmniquery({
-        url: "https://api.shanbay.com/bdc/search/?word=",
-        /*
-         * or
-        url: function(q) {
-            return "https://api.shanbay.com/bdc/search/?word=" + q
-        },
-        */
-        query: Visual.getWordUnderCursor(),
-        style: "opacity: 0.8;",
-        parseResult: function(res) {
-            var res = JSON.parse(res.text);
-            return [ renderShanbay(res) ];
-        }
-    });
-});
-Visual.setTranslationService("https://api.shanbay.com/bdc/search/?word=", function(res) {
-    var res = JSON.parse(res.text);
-    return renderShanbay(res);
+    Front.openOmniquery({query: Visual.getWordUnderCursor(), style: "opacity: 0.8;"});
 });
 mapkey('b', '#8Open a bookmark', function() {
     Front.openOmnibar(({type: "Bookmarks"}));
@@ -404,6 +373,9 @@ mapkey('>>', '#3Move current tab to right', function() {
 mapkey('w', '#2Switch frames', function() {
     Normal.rotateFrame();
 });
+mapkey(';w', '#2Focus top window', function() {
+    top.focus();
+});
 mapkey('cc', '#7Open selected link or link from clipboard', function() {
     if (window.getSelection().toString()) {
         tabOpenLink(window.getSelection().toString());
@@ -450,6 +422,10 @@ mapkey('yt', '#3Duplicate current tab', function() {
 });
 mapkey('yy', "#7Copy current page's URL", function() {
     Clipboard.write(window.location.href);
+});
+mapkey('yh', "#7Copy current page's host", function() {
+    var url = new URL(window.location.href);
+    Clipboard.write(url.host);
 });
 mapkey('yl', "#7Copy current page's title", function() {
     Clipboard.write(document.title);
@@ -595,9 +571,14 @@ mapkey('sm', '#11Preview markdown', function() {
 mapkey('<Ctrl-Alt-d>', '#11Mermaid diagram generator', function() {
     tabOpenLink("/pages/mermaid.html");
 });
-mapkey('su', '#4Edit current URL with vim editor', function() {
+mapkey('su', '#4Edit current URL with vim editor, and open in new tab', function() {
     Front.showEditor(window.location.href, function(data) {
         tabOpenLink(data);
+    }, 'url');
+});
+mapkey('sU', '#4Edit current URL with vim editor, and reload', function() {
+    Front.showEditor(window.location.href, function(data) {
+        window.location.href = data;
     }, 'url');
 });
 mapkey(';m', '#1mouse out last element', function() {
@@ -608,6 +589,9 @@ mapkey(';j', '#12Close Downloads Shelf', function() {
 });
 mapkey(';pp', '#7Paste html on current page', function() {
     Clipboard.read(function(response) {
+        document.documentElement.removeAttributes();
+        document.body.removeAttributes();
+        setInnerHTML(document.head, "<title>" + new Date() +" updated by Surfingkeys</title>");
         setInnerHTML(document.body, response.data);
     });
 });

@@ -44,6 +44,18 @@ function isElementVisible(elm) {
     return elm.offsetHeight > 0 && elm.offsetWidth > 0;
 }
 
+function isElementClickable(e) {
+    var cssSelector = "a, button, select, input, textarea, *[onclick], *[contenteditable=true], *.jfk-button, *.goog-flat-menu-button, *[role]";
+    if (runtime.conf.clickableSelector.length) {
+        cssSelector += ", " + runtime.conf.clickableSelector;
+    }
+
+    return e.matches(cssSelector)
+        || getComputedStyle(e).cursor === "pointer"
+        || getComputedStyle(e).cursor.substr(0, 4) === "url("
+        || e.closest("a, *[onclick], *[contenteditable=true], *.jfk-button, *.goog-flat-menu-button") !== null;
+}
+
 function getRealEdit(event) {
     var rt = event ? event.target : document.activeElement;
     // on some pages like chrome://history/, input is in shadowRoot of several other recursive shadowRoots.
@@ -177,14 +189,14 @@ function filterAncestors(elements) {
 function filterOverlapElements(elements) {
     // filter out tiny elements
     elements = elements.filter(function(e) {
-        var be = e.getBoundingClientRect();
+        var be = e.getClientRects()[0];
         if (e.disabled || e.readOnly || be.width <= 4) {
             return false;
-        } else if (e.matches("input, textarea, select, form")) {
+        } else if (e.matches("input, textarea, select, form") || e.contentEditable === "true") {
             return true;
         } else {
             var el = document.elementFromPoint(be.left + be.width / 2, be.top + 3);
-            return !el || el.shadowRoot && el.childElementCount === 0 || el.contains(e);
+            return !el || el.shadowRoot && el.childElementCount === 0 || el.contains(e) || e.contains(el);
         }
     });
 
@@ -492,4 +504,10 @@ HTMLElement.prototype.show = function () {
 
 HTMLElement.prototype.hide = function () {
     this.style.display = "none";
+};
+
+HTMLElement.prototype.removeAttributes = function () {
+    while (this.attributes.length > 0) {
+        this.removeAttribute(this.attributes[0].name);
+    }
 };
