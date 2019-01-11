@@ -1,3 +1,6 @@
+const separator = '➤';
+const separatorHtml = `<span class='separator'>${separator}</span>`;
+
 function _regexFromString(str, highlight) {
     var rxp = null;
     if (/^\/.+\/([gimuy]*)$/.test(str)) {
@@ -421,24 +424,32 @@ var Omnibar = (function() {
         var type = b.type, additional = "", uid = b.uid;
         if (!type) {
             if (b.hasOwnProperty('lastVisitTime')) {
-                type = "☼";
+                type = "🕜";
                 additional = `<span class=omnibar_timestamp># ${timeStampString(b.lastVisitTime)}</span>`;
                 additional += `<span class=omnibar_visitcount> (${b.visitCount})</span>`;
                 uid = "H" + b.url;
             } else if(b.hasOwnProperty('dateAdded')) {
-                type = "☆";
+                type = "⭐";
                 additional = `<span class=omnibar_folder>@ ${bookmarkFolders[b.parentId].title || ""}</span> <span class=omnibar_timestamp># ${timeStampString(b.dateAdded)}</span>`;
                 uid = "B" + b.id;
             } else if(b.hasOwnProperty('width')) {
-                type = "▓";
+                type = "🔖";
                 uid = "T" + b.windowId + ":" + b.id;
             } else {
-                type = "▤";
+                type = "🔥";
             }
         }
         var li = createElement(`<li><div class="title">${type} ${self.highlight(rxp, htmlEncode(b.title))} ${additional}</div><div class="url">${self.highlight(rxp, b.url)}</div></li>`);
         li.uid = uid;
         li.url = b.url;
+        return li;
+    };
+
+    self.createItemFromRawHtml = function({ html, props }) {
+        const li = createElement(html);
+        if (typeof props === "object") {
+            Object.assign(li, props);
+        }
         return li;
     };
 
@@ -500,7 +511,12 @@ var Omnibar = (function() {
         }
         self.listResults(_page, function(b) {
             var li;
-            if (b.hasOwnProperty('url')) {
+            if (b.hasOwnProperty('html')) {
+                li = self.createItemFromRawHtml(b);
+            } else if (b.hasOwnProperty('url') && b.url !== undefined) {
+                if (window.navigator.userAgent.indexOf("Firefox") !== -1 && /^(place|data):/i.test(b.url)) {
+                    return null;
+                }
                 li = self.createURLItem(b, rxp);
             } else if (_showFolder) {
                 li = createElement(`<li><div class="title">▷ ${self.highlight(rxp, b.title)}</div></li>`);
@@ -612,7 +628,10 @@ var Omnibar = (function() {
         }
         var ul = createElement("<ul/>");
         items.forEach(function(b) {
-            ul.append(renderItem(b));
+            var li = renderItem(b);
+            if (li) {
+                ul.append(li);
+            }
         });
         self.resultsDiv.append(ul);
         items = self.resultsDiv.querySelectorAll("#sk_omnibarSearchResult>ul>li");
@@ -730,6 +749,9 @@ var OpenBookmarks = (function() {
                     action: 'getBookmarks',
                 }, self.onResponse);
             }
+            if (Omnibar.input.value !== "") {
+                self.onInput();
+            }
         });
     };
 
@@ -776,7 +798,7 @@ var OpenBookmarks = (function() {
         var items = response.bookmarks;
         if (folderOnly) {
             items = items.filter(function(b) {
-                return !b.hasOwnProperty('url');
+                return !b.hasOwnProperty('url') || b.url === undefined;
             });
         }
         Omnibar.listURLs(items, true);
@@ -885,8 +907,9 @@ var AddBookmark = (function() {
 
     self.onInput = function() {
         var query = Omnibar.input.value;
+        var caseSensitive = runtime.getCaseSensitive(query);
         var matches = folders.filter(function(b) {
-            if (runtime.conf.caseSensitive)
+            if (caseSensitive)
               return b.title.indexOf(query) !== -1;
             else
               return b.title.toLowerCase().indexOf(query.toLowerCase()) !== -1;
@@ -1174,7 +1197,9 @@ var SearchEngine = (function() {
                         Omnibar.detectAndInsertURLItem(Omnibar.input.value, resp);
                         var rxp = _regexFromString(val, true);
                         Omnibar.listResults(resp, function (w) {
-                            if (w.hasOwnProperty('url')) {
+                            if (w.hasOwnProperty('html')) {
+                                return Omnibar.createItemFromRawHtml(w);
+                            } else if (w.hasOwnProperty('url')) {
                                 return Omnibar.createURLItem(w, rxp);
                             } else {
                                 var li = createElement(`<li>⌕ ${w}</li>`);

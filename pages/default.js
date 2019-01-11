@@ -51,9 +51,10 @@ mapkey(';cp', '#13Copy proxy info', function() {
 mapkey(';ap', '#13Apply proxy info from clipboard', function() {
     Clipboard.read(function(response) {
         var proxyConf = JSON.parse(response.data);
-        RUNTIME('updateProxy', {
-            host: proxyConf.autoproxy_hosts.join(","),
-            operation: 'add',
+        runtime.command({
+            action: 'updateProxy',
+            operation: 'set',
+            host: proxyConf.autoproxy_hosts,
             proxy: proxyConf.proxy,
             mode: proxyConf.proxyMode
         });
@@ -246,9 +247,6 @@ cmap('<ArrowDown>', '<Tab>');
 cmap('<ArrowUp>', '<Shift-Tab>');
 cmap('<Ctrl-n>', '<Tab>');
 cmap('<Ctrl-p>', '<Shift-Tab>');
-mapkey('q', '#1Click on an Image or a button', function() {
-    Hints.create("img, button", Hints.dispatchMouseClick);
-});
 mapkey('<Alt-i>', '#0enter PassThrough mode to temporarily suppress SurfingKeys', function() {
     Normal.passThrough();
 });
@@ -289,7 +287,10 @@ mapkey('go', '#8Open a URL in current tab', function() {
     Front.openOmnibar({type: "URLs", extra: "getAllSites", tabbed: false});
 });
 mapkey('oi', '#8Open incognito window', function() {
-    RUNTIME('openIncognito');
+    runtime.command({
+        action: 'openIncognito',
+        url: window.location.href
+    });
 });
 mapkey('ox', '#8Open recently closed URL', function() {
     Front.openOmnibar({type: "URLs", extra: "getRecentlyClosed"});
@@ -437,6 +438,14 @@ mapkey('yf', '#7Copy form data in JSON on current page', function() {
     });
     Clipboard.write(JSON.stringify(fd, null, 4));
 });
+mapkey('yQ', '#7Copy all query history of OmniQuery.', function() {
+    runtime.command({
+        action: 'getSettings',
+        key: 'OmniQueryHistory'
+    }, function(response) {
+        Clipboard.write(response.settings.OmniQueryHistory.join("\n"));
+    });
+});
 mapkey(';pf', '#7Fill form with data from yf', function() {
     Hints.create('form', function(element, event) {
         var formKey = (element.method || "get") + "::" + element.action;
@@ -481,6 +490,9 @@ mapkey('ob', '#8Open Search with alias b', function() {
 mapkey('og', '#8Open Search with alias g', function() {
     Front.openOmnibar({type: "SearchEngine", extra: "g"});
 });
+mapkey('od', '#8Open Search with alias d', function() {
+    Front.openOmnibar({type: "SearchEngine", extra: "d"});
+});
 mapkey('ow', '#8Open Search with alias w', function() {
     Front.openOmnibar({type: "SearchEngine", extra: "w"});
 });
@@ -522,6 +534,9 @@ if (window.navigator.userAgent.indexOf("Firefox") > 0) {
     mapkey('si', '#12Open Chrome Inspect', function() {
         tabOpenLink("chrome://inspect/#devices");
     });
+    mapkey('<Ctrl-Alt-d>', '#11Mermaid diagram generator', function() {
+        tabOpenLink("/pages/mermaid.html");
+    });
 }
 mapkey('gs', '#12View page source', function() {
     RUNTIME("viewSource", { tab: { tabbed: true }});
@@ -562,14 +577,14 @@ mapkey('gx0', '#3Close all tabs on left', function() {
 mapkey('gx$', '#3Close all tabs on right', function() {
     RUNTIME("closeTabsToRight");
 });
+mapkey('gxx', '#3Close all tabs except current one', function() {
+    RUNTIME("tabOnly");
+});
 mapkey('se', '#11Edit Settings', function() {
     tabOpenLink("/pages/options.html");
 });
 mapkey('sm', '#11Preview markdown', function() {
     tabOpenLink("/pages/markdown.html");
-});
-mapkey('<Ctrl-Alt-d>', '#11Mermaid diagram generator', function() {
-    tabOpenLink("/pages/mermaid.html");
 });
 mapkey('su', '#4Edit current URL with vim editor, and open in new tab', function() {
     Front.showEditor(window.location.href, function(data) {
@@ -631,9 +646,11 @@ addSearchAliasX('w', 'bing', 'http://global.bing.com/search?setmkt=en-us&setlang
 addSearchAliasX('s', 'stackoverflow', 'http://stackoverflow.com/search?q=');
 addSearchAliasX('h', 'github', 'https://github.com/search?type=Code&utf8=%E2%9C%93&q=');
 addSearchAliasX('y', 'youtube', 'https://www.youtube.com/results?search_query=', 's',
-'http://suggestqueries.google.com/complete/search?client=youtube&ds=yt&client=chrome-ext&q=', function(response) {
-    var res = JSON.parse(response.text);
-    return res[1];
+'https://clients1.google.com/complete/search?client=youtube&ds=yt&callback=cb&q=', function(response) {
+    var res = JSON.parse(response.text.substr(9, response.text.length-10));
+    return res[1].map(function(d) {
+        return d[0];
+    });
 });
 
 document.dispatchEvent(new CustomEvent('surfingkeys:defaultSettingsLoaded'));

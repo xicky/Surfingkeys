@@ -139,7 +139,11 @@ var Insert = (function() {
     self.mappings.add(KeyboardUtils.encodeKeystroke("<Esc>"), {
         annotation: "Exit insert mode",
         feature_group: 15,
-        keepPropagation: true,
+        stopPropagation: function(key) {
+            // return true only if bind key is not an ASCII key
+            // so that imap(',,', "<Esc>") won't leave a comma in input
+            return key.charCodeAt(0) < 256;
+        },
         code: function() {
             getRealEdit().blur();
             self.exit();
@@ -153,7 +157,9 @@ var Insert = (function() {
     self.mappings.add(":", {
         annotation: "Input emoji",
         feature_group: 15,
-        keepPropagation: true,
+        stopPropagation: function() {
+            return false;
+        },
         code: function() {
             var element = getRealEdit();
             if (element.selectionStart !== undefined) {
@@ -255,7 +261,7 @@ var Insert = (function() {
 
     function rotateResult(backward) {
         var si = _emojiDiv.querySelector('#sk_emoji>div.selected');
-        var _items = _emojiDiv.querySelectorAll('#sk_emoji>div');
+        var _items = Array.from(_emojiDiv.querySelectorAll('#sk_emoji>div'));
         var ci = (_items.indexOf(si) + (backward ? -1 : 1)) % _items.length;
         si.classList.remove('selected');
         _items[ci].classList.add('selected');
@@ -264,7 +270,6 @@ var Insert = (function() {
     var _suppressKeyup = false;
     self.addEventListener('keydown', function(event) {
         // prevent this event to be handled by Surfingkeys' other listeners
-        event.sk_suppressed = true;
         var realTarget = getRealEdit(event);
         if (_emojiDiv.offsetHeight > 0) {
             if (Mode.isSpecialKeyOf("<Esc>", event.sk_keyName)) {
@@ -335,6 +340,7 @@ var Insert = (function() {
                 }
             });
         }
+        event.sk_suppressed = true;
     });
     self.addEventListener('keyup', function(event) {
         var realTarget = getRealEdit(event);
@@ -395,13 +401,16 @@ var Insert = (function() {
 
     var _element;
     var _enter = self.enter;
-    self.enter = function(elm) {
+    self.enter = function(elm, keepCursor) {
+        if (elm === document.body) {
+            runtime.conf.showModeStatus = false;
+        }
         var changed = (_enter.call(self) === -1);
         if (_element !== elm) {
             _element = elm;
             changed = true;
         }
-        if (changed && runtime.conf.cursorAtEndOfInput && elm.nodeName !== 'SELECT') {
+        if (changed && !keepCursor && runtime.conf.cursorAtEndOfInput && elm.nodeName !== 'SELECT') {
             moveCusorEOL();
         }
     };

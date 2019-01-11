@@ -355,7 +355,7 @@ SwitchySharp是个很好的代理管理插件，但我的用法很简单，
 * setProxyMode, 设置代理模式，有五种模式：direct, byhost, bypass, always, system 和 clear。
 
         direct      Chrome不使用代理访问任何网站。
-        byhost      Chrome只在访问你通过`addProxySite`命令添加过的网站时使用代理。
+        byhost      Chrome只在访问你通过`addProxySite`命令添加过的网站时使用代理。你可以添加多条映射，让不同的网站使用不同的代理。
         bypass      Chrome使用代理访问所有网站，除了通过`addProxySite`命令添加过的网站。
         always      Chrome使用代理访问所有网站。
         system      Chrome使用操作系统设置的代理。
@@ -453,9 +453,13 @@ Surfingkeys默认使用[这个markdown分析器](https://github.com/chjj/marked)
 
 ## 截屏
 
+如果你需要截屏，下面这些按键用得上，尤其是当你想截长屏／或页面中某个可以滚动的DIV时。
+
 * `yg` 截当前页的屏。
 * `yG` 滚动截完整页。
 * `yS` 截当前滚动对象的屏。
+
+按完以上任一快捷键之后，会弹出你所截取的图片，然后你可以用鼠标（😢）右键单击图片来保存或者复制。
 
 ## mermaid图形生成器
 
@@ -632,8 +636,10 @@ Surfingkeys默认使用[这个markdown分析器](https://github.com/chjj/marked)
 | settings.enableAutoFocus | true | 是否允许光标自动定位到动态显示的输入框里。这个设置和`stealFocusOnLoad`不同，那个只是在页面加载完成后跳出输入框。比如，有一个页面上有个隐藏的输入框，它只在用户点击某个链接后显示出来。如果你不想这个刚显示出来的输入框自动获得焦点，就可以把这个设置设为false。 |
 | settings.theme | undefined | 修改Surfingkeys界面风格。 |
 | settings.caseSensitive | false | 网页内搜索是否大小写敏感。 |
+| settings.smartCase | true | 当搜索关键字里含有大写字符时，是否自动设为大小写敏感。 |
 | settings.cursorAtEndOfInput | true | 是否在进入输入框时把光标放在结尾，为false时，光标将放在上次离开输入框时的位置。 |
 | settings.digitForRepeat | true | 是否把数字输入当作重复次数，为false时，数字可作为普通按键。 |
+| settings.editableBodyCare | true | 当焦点定位到一个可编辑的元素时，Insert模式会自动激活，所以如果某个window/iframe里的document.body本身就是可编辑的（例如docs.google.com），Insert模式会一直处于激活状态，这样所有Normal模式下的按键都不可用了。当`editableBodyCare`为`true`时，Insert模式在这种情况下不会自动激活。|
 
 ### settings.theme示例，修改状态栏字体
 
