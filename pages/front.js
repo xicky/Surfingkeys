@@ -67,7 +67,14 @@ var Front = (function() {
         });
         if (pointerEvents) {
             window.focus();
-            visibleDivs[0].focus();
+            if (visibleDivs[0] === self.omnibar) {
+                self.omnibar.querySelector("input").focus();
+            } else if (visibleDivs[0] === _editor) {
+                var input = (_editor.querySelector("div.ace_dialog-bottom>input") || _editor.querySelector("textarea"));
+                input && input.focus();
+            } else {
+                visibleDivs[0].focus();
+            }
         }
         top.postMessage({
             action: 'setFrontFrame',

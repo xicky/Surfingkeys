@@ -143,7 +143,7 @@ function getVisibleElements(filter) {
         var rect = e.getBoundingClientRect();
         if ( (rect.top <= window.innerHeight) && (rect.bottom >= 0)
             && (rect.left <= window.innerWidth) && (rect.right >= 0)
-            && rect.height < window.innerHeight && rect.height > 0
+            && rect.height > 0
         ) {
             filter(e, visibleElements);
         }
@@ -248,6 +248,23 @@ function getTextNodes(root, pattern, flag) {
         while (treeWalker.nextNode()) nodes.push(treeWalker.currentNode);
     }
     return nodes;
+}
+
+function getTextNodePos(node, offset, length) {
+    var selection = document.getSelection();
+    selection.setBaseAndExtent(node, offset, node, length ? (offset + length) : node.data.length);
+    var br = selection.getRangeAt(0).getClientRects()[0];
+    var pos = {
+        left: -1,
+        top: -1
+    };
+    if (br.height > 0 && br.width > 0) {
+        pos.left = br.left;
+        pos.top = br.top;
+        pos.width = br.width;
+        pos.height = br.height;
+    }
+    return pos;
 }
 
 function initL10n(cb) {
@@ -510,4 +527,19 @@ HTMLElement.prototype.removeAttributes = function () {
     while (this.attributes.length > 0) {
         this.removeAttribute(this.attributes[0].name);
     }
+};
+NodeList.prototype.remove = function() {
+    this.forEach(function(node) {
+        node.remove();
+    });
+};
+NodeList.prototype.show = function() {
+    this.forEach(function(node) {
+        node.show();
+    });
+};
+NodeList.prototype.hide = function() {
+    this.forEach(function(node) {
+        node.hide();
+    });
 };
