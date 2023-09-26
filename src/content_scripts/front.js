@@ -234,7 +234,7 @@ function createFront(insert, normal, hints, visual, browser) {
         // setEditorText and setValueWithEventDispatched are experimental APIs from Brook Build of Chromium
         // https://brookhong.github.io/2021/04/18/brook-build-of-chromium.html
         if (elementBehindEditor.nodeName === "DIV") {
-            if (elementBehindEditor.className === "CodeMirror-code") {
+            if (elementBehindEditor.className === "CodeMirror-code" || elementBehindEditor.classList.contains("ProseMirror")) {
                 window.getSelection().selectAllChildren(elementBehindEditor)
                 let dataTransfer = new DataTransfer()
                 dataTransfer.items.add(data, 'text/plain')
