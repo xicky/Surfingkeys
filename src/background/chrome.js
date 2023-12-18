@@ -105,31 +105,110 @@ function _setNewTabUrl(){
 function _getContainerName(self, _response){
 }
 
-function getLatestHistoryItem(text, maxResults, cb) {
-    const caseSensitive = text.toLowerCase() !== text;
-    let endTime = new Date().getTime();
-    let results = [];
-    const impl = (endTime, maxResults, cb) => {
-        const prefetch = maxResults * Math.pow(10, Math.min(2, text.length));
-        chrome.history.search({
-            startTime: 0,
-            endTime,
-            text: "",
-            maxResults: prefetch
-        }, function(items) {
-            const filtered = filterByTitleOrUrl(items, text);
-            results = [...results, ...filtered];
-            if (items.length < maxResults || results.length >= maxResults) {
-                // all items are scanned or we have got what we want
-                cb(results.slice(0, maxResults));
-            } else {
-                endTime = items[items.length-1].lastVisitTime - 0.01;
-                impl(endTime, maxResults, cb);
+const HistoryCache = {
+    size: 20000,
+    // an array of History items returned from Chrome
+    history: null,
+
+    reset() {
+        this.history = null;
+        chrome.history.onVisited.removeListener(this._onVisitedListener);
+        chrome.history.onVisitRemoved.removeListener(this._onVisitRemovedListener);
+    },
+
+    async onLoaded() {
+        if (this.history) return;
+        await this.fetchHistory();
+    },
+
+    async fetchHistory() {
+        if (this.chromeHistoryPromise) {
+            await this.chromeHistoryPromise;
+            return;
+        }
+
+        this.chromeHistoryPromise = new Promise((resolve, reject) => {
+            chrome.history.search({
+                text: "",
+                maxResults: this.size,
+                startTime: 0,
+            }, function (items) {
+                resolve(items);
+            });
+        });
+
+        const history = await this.chromeHistoryPromise;
+        history.sort(this.compareHistoryByUrl);
+        this.history = history;
+        chrome.history.onVisited.addListener(this._onVisitedListener);
+        chrome.history.onVisitRemoved.addListener(this._onVisitRemovedListener);
+        this.chromeHistoryPromise = null;
+    },
+
+    compareHistoryByUrl(a, b) {
+        if (a.url === b.url) return 0;
+        if (a.url > b.url) return 1;
+        return -1;
+    },
+
+    onVisited(newPage) {
+        if (newPage.title == null) newPage.title = "";
+        const i = HistoryCache.binarySearch(newPage, this.history, this.compareHistoryByUrl);
+        const pageWasFound = this.history[i]?.url === newPage.url;
+        if (pageWasFound) {
+            this.history[i] = newPage;
+        } else {
+            this.history.splice(i, 0, newPage);
+        }
+    },
+
+    onVisitRemoved(toRemove) {
+        if (toRemove.allHistory) {
+            this.history = [];
+            return;
+        }
+
+        toRemove.urls.forEach((url) => {
+            const i = HistoryCache.binarySearch({ url }, this.history, this.compareHistoryByUrl);
+            if ((i < this.history.length) && (this.history[i].url === url)) {
+                this.history.splice(i, 1);
             }
         });
-    };
+    },
+};
 
-    impl(endTime, maxResults, cb);
+HistoryCache._onVisitedListener = HistoryCache.onVisited.bind(HistoryCache);
+HistoryCache._onVisitRemovedListener = HistoryCache.onVisitRemoved.bind(HistoryCache);
+
+HistoryCache.binarySearch = (target, array, compareFun) => {
+    let element, middle;
+    let high = array.length - 1;
+    let low = 0;
+
+    while (low <= high) {
+        middle = Math.floor((low + high) / 2);
+        element = array[middle];
+        const compareResult = compareFun(element, target);
+        if (compareResult > 0) {
+            high = middle - 1;
+        } else if (compareResult < 0) {
+            low = middle + 1;
+        } else {
+            return middle;
+        }
+    }
+
+    if (compareFun(element, target) < 0) {
+        return middle + 1;
+    }
+    return middle;
+}
+
+function getLatestHistoryItem(text, maxResults, cb) {
+    HistoryCache.onLoaded().then(() => {
+        const filtered = filterByTitleOrUrl(HistoryCache.history, text);
+        cb(filtered.slice(0, maxResults));
+    });
 }
 
 function generatePassword() {

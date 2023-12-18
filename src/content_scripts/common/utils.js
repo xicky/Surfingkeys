@@ -818,6 +818,10 @@ function regexFromString(str, highlight) {
 }
 
 function filterByTitleOrUrl(urls, query) {
+    // TODO: improve matching method
+    // refer to Vimimum's HistoryCompleter:
+    //    https://github.com/philc/vimium/blob/master/background_scripts/completion.js#L348
+    //    RankingUtils: https://github.com/philc/vimium/blob/master/background_scripts/completion.js#L686C9-L686C9
     if (query && query.length) {
         var rxp = regexFromString(query, false);
         urls = urls.filter(function(b) {

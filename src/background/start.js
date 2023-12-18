@@ -686,6 +686,7 @@ function start(browser) {
 
 
     function _getHistory(text, maxResults, cb, sortByMostUsed) {
+        // TODO: sort by relevancy?
         browser.getLatestHistoryItem(text, maxResults, (items) => {
             if (sortByMostUsed) {
                 items = items.sort(function(a, b) {

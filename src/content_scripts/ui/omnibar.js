@@ -546,6 +546,7 @@ function createOmnibar(front, clipboard) {
             url = fi.url;
         } else {
             url = self.input.value;
+            // TODO-yg: change url detection
             if (url.indexOf(':') === -1) {
                 url = searchEngine.aliases[runtime.conf.defaultSearchEngine].url + url;
             }
@@ -975,7 +976,7 @@ function OpenURLs(prompt, omnibar, queryFn) {
         sequenceNumber = 0;
         queryAndList();
     };
-    self.onInput = debounce(queryAndList, 200);
+    self.onInput = debounce(queryAndList, 50); // TODO: think about this delay
     self.onClose = function() {
         self.onInput.cancel();
     };
