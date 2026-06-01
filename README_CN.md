@@ -68,6 +68,8 @@ Surfingkeys尽量让用户使用键盘进行网页浏览，但有些限制是Goo
 * 插入模式下的表情下拉选项
 * 按键实时提示
 * 所有按键对PDF适用
+* Regional Hints mode
+* 大语言模型对话
 
 ## 快速上手
 
@@ -90,18 +92,6 @@ Surfingkeys尽量让用户使用键盘进行网页浏览，但有些限制是Goo
 ![visual](https://cloud.githubusercontent.com/assets/288207/16182120/1cc536da-36d5-11e6-9e08-293cdb8fbcd2.png)
 * `T` 切换标签页
 ![tabs](https://cloud.githubusercontent.com/assets/288207/10328839/f0143ffe-6ceb-11e5-8eee-962db94b2c22.png)
-
-## 打开连接
-
-默认的拨号键有`asdfgqwertzxcvb`，如果按了一个非拨号键，会自动退出拨号。下面的设置可以改成右手习惯：
-
-    Hints.characters = 'yuiophjklnm'; // for right hand
-
-当拨号盘有重叠上，可以按`Shift`翻转重叠的拨号盘。按住空格键可隐藏拨号盘，松开恢复。
-
-所有拨号放在目标链接的中间，你可以用下面的设置让它们靠左对齐：
-
-    settings.hintAlign = "left";
 
 ## Surfingkeys支持的模式
 
@@ -134,6 +124,31 @@ Surfingkeys有三种模式：normal，visual和insert。
 * `;` 重复最后的`f`/`F`操作。
 * `,` 反向重复最后的`f`/`F`操作。
 
+### Hints mode
+按`f`键进入Hints mode可以打开链接，也有其它行为不同的组合，比如`cf`可以连续打开链接，`af`指定在新标签页打开。
+
+默认的拨号键有`asdfgqwertzxcvb`，如果按了一个非拨号键，会自动退出拨号。下面的设置可以改成右手习惯：
+
+    Hints.characters = 'yuiophjklnm'; // for right hand
+
+当拨号盘有重叠上，可以按`Shift`翻转重叠的拨号盘。按住空格键可隐藏拨号盘，松开恢复。
+
+所有拨号放在目标链接的中间，你可以用下面的设置让它们靠左对齐：
+
+    settings.hintAlign = "left";
+
+#### Regional Hints mode
+
+按`L`键选择一个大块元素进入Regional Hints mode，目前自带的操作有
+
+* `Esc` 退出Regional Hints mode
+* `ct` 复制该大块元素的文本
+* `ch` 复制该大块元素的HTML
+* `d` 删除该大块元素
+* `l` 与大语言模型讨论选中文本
+
+[Demo on YouTube](https://www.youtube.com/watch?v=pFPOzAZDO38)
+
 ### Insert mode
 
 当输入焦点定位到各类输入框时（无论你是通过`i`或`f`选择定位还是鼠标点击定位的），就进入该模式。
@@ -142,7 +157,7 @@ Surfingkeys有三种模式：normal，visual和insert。
 * `Ctrl - i` 打开vim编辑器。
 * `Ctrl - '` 把输入框里的内容用双引号引起来或去除双引号，方便在搜索引擎页面上搜索时使用。
 * `Ctrl-e`移动光标到行尾。
-* `Ctrl-f` 移动光标到行首。
+* `Ctrl-a` 移动光标到行首， 在Windows下用`Ctrl-f`避免和全选冲突。
 * `Ctrl-u` 删除光标前所有输入。
 * `Alt-b` 移动光标到后一个词。
 * `Alt-f` 移动光标到前一个词。
@@ -169,7 +184,7 @@ Surfingkeys有三种模式：normal，visual和insert。
 
     settings.startToShowEmoji = 0;
 
-[表情符号完整列表](https://github.com/brookhong/Surfingkeys/blob/master/pages/emoji.tsv)
+[表情符号完整列表](https://github.com/brookhong/Surfingkeys/blob/master/src/pages/emoji.tsv)
 
 ### 查找
 
@@ -269,9 +284,11 @@ search_leader_key(`s`)加上大写的别名(`G`)会打开搜索框让你可以�
 
 默认情况下，按`T`会显示所有已打开标签页，然后按相应的提示键可以切到该标签页。
 
-![tabs_overlay](https://cloud.githubusercontent.com/assets/288207/10544636/245447f6-7457-11e5-8372-62b8f6337158.png)
+![tabs_overlay](https://github.com/brookhong/Surfingkeys/assets/288207/f0ca339d-133f-4fb0-b902-cdc64fc71374)
 
-这里有个设置`settings.tabsThreshold`，当然打开的标签页总数超过它时，再按空格就会使用搜索栏来选择标签。
+如果你按的键没有匹配到任何标签，搜索栏会自动打开。因此你可以直接按一个标签提示符中不存在的键比如`;`或者`j`直接打开搜索栏来搜索标签。
+
+这里也有个设置`settings.tabsThreshold`，当然打开的标签页总数超过它时，再按空格就会使用搜索栏来选择标签。
 
 ![tabs_omnibar](https://cloud.githubusercontent.com/assets/288207/10544630/1fbdd02c-7457-11e5-823c-14411311c315.png)
 
@@ -394,17 +411,11 @@ SwitchySharp是个很好的代理管理插件，但我的用法很简单，
 * setProxyMode, 设置代理模式，有五种模式：direct, byhost, bypass, always, system 和 clear。
 
         direct      Chrome不使用代理访问任何网站。
-        byhost      Chrome只在访问你通过`addProxySite`命令添加过的网站时使用代理。你可以添加多条映射，让不同的网站使用不同的代理。
-        bypass      Chrome使用代理访问所有网站，除了通过`addProxySite`命令添加过的网站。
+        byhost      Chrome只在访问你添加过的网站时使用代理。你可以添加多条映射，让不同的网站使用不同的代理。
+        bypass      Chrome使用代理访问所有网站，除了添加过的网站。
         always      Chrome使用代理访问所有网站。
         system      Chrome使用操作系统设置的代理。
         clear       Surfingkeys不管代理，有其他插件管理，也就是禁用Surfingkeys的代理管理功能, 这是默认模式。
-
-* addProxySite, removeProxySite, toggleProxySite, 管理你需要通过代理访问的网站，比如：
-
-        addProxySite google.com,facebook.com,twitter.com
-
-* proxyInfo, 列出你当前的代理设置，包括用以上命令设置的信息。
 
 * `cp`, 切换当前站点的代理设置，即是否使用代理访问当前站点。
 
@@ -530,6 +541,7 @@ Surfingkeys默认使用[这个markdown分析器](https://github.com/chjj/marked)
 | settings.omnibarSuggestionTimeout | 200 | 设置触发搜索引擎提示的超时，当按键过去设定毫秒后才发起搜索引擎提示的请求，这样避免每次按键就触发请求。|
 | settings.focusFirstCandidate | false | 是否在搜索栏下面自动选择第一个匹配的结果。 |
 | settings.tabsThreshold | 100 | 当打开标签页的数量超过设定值时，使用搜索栏来查找标签页。 |
+| settings.verticalTabs | true | 是否纵向排列标签选择栏。 |
 | settings.clickableSelector | "" | 自定义CSS selector用于f键选择无法检测到的可点击元素，例如"\*.jfk-button, \*.goog-flat-menu-button"。 |
 | settings.clickablePat | /(https?&#124;thunder&#124;magnet):\/\/\S+/ig | 用于检测文字中可点击链接的正则表达式，你可以按`O`打开检测到的链接。|
 | settings.editableSelector | div.CodeMirror-scroll,div.ace_content | 额外CSS selector以自定义可编辑元素。|
@@ -543,7 +555,7 @@ Surfingkeys默认使用[这个markdown分析器](https://github.com/chjj/marked)
 | settings.defaultSearchEngine | "g" | 搜索栏里的默认搜索引擎。 |
 | settings.blocklistPattern | undefined | 如果当前访问的网站匹配设定的正则表达式，则禁用Surfingkeys。 |
 | settings.focusAfterClosed | "right" | 关掉当前标签页后，切换到哪一侧的标签页。["left", "right"] |
-| settings.repeatThreshold | 99 | 操作可重复最多次数。 |
+| settings.repeatThreshold | 9 | 操作可重复最多次数。 |
 | settings.tabsMRUOrder | true | 查找打开标签页时，是否按最近访问顺序列出所有标签页。 |
 | settings.historyMUOrder | true | 查找访问记录时，是否按最常访问顺序列出所有访问记录。 |
 | settings.newTabPosition | 'default' | 在哪个位置创建新标签页。["left", "right", "first", "default"] |
@@ -564,6 +576,9 @@ Surfingkeys默认使用[这个markdown分析器](https://github.com/chjj/marked)
 | settings.caretViewport | null | 按`[top, left, bottom, right]`格式设置，可以限制按`v`进入可视模式时的选择范围。比如`[window.innerHeight / 2 - 10, 0, window.innerHeight / 2 + 10, window.innerWidth]`会使Surfingkeys只会为显示在窗口中间的文字生成拨号盘字符。|
 | settings.mouseSelectToQuery | [] | 所有启用鼠标选择查询功能的网站列表。 |
 | settings.autoSpeakOnInlineQuery | false | 是否在使用inline query时自动发声。 |
+| settings.showTabIndices | false | 是否在标签页标题上显示当前标签页的编号。 |
+| settings.tabIndicesSeparator | "\|" | 标签页编号与标签页原始标题之间的分隔符。 |
+| settings.disabledOnActiveElementPattern | undefined | 当活动元素匹配这个设置时自动停用Surfingkeys，当活动元素变了继续启用，一个比较有用的场景是可以通过这个设置允许用户在一个大的下拉列表中通过按键快速定位选项，比如 `settings.disabledOnActiveElementPattern = "ul.select-dropdown-options";` |
 
 ### settings.theme示例，修改状态栏字体
 
@@ -572,6 +587,71 @@ Surfingkeys默认使用[这个markdown分析器](https://github.com/chjj/marked)
             font-size: 20pt;
         }
     }`;
+
+## 大语言模型对话
+目前集成了比较常用的几个大语言模型，可用`A`调出对话窗口，
+
+* Ollama
+* Bedrock
+* DeepSeek
+* Gemini
+* 自定义模型(例如：SiliconFlow 和 OpenRouter, 其他和OpenAI API兼容的服务应该也可以)
+
+使用之前，必须设置相应的密钥或者API key，比如
+
+    settings.defaultLLMProvider = "bedrock";
+    settings.llm = {
+        bedrock: {
+            accessKeyId: '********************',
+            secretAccessKey: '****************************************',
+            // model: 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+            model: 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+        },
+        gemini: {
+            apiKey: '***************************************',
+        },
+        ollama: {
+            model: 'qwen2.5-coder:32b',
+        },
+        deepseek: {
+            apiKey: '***********************************',
+            model: 'deepseek-chat',
+        },
+        custom: {
+            serviceUrl: 'https://api.siliconflow.cn/v1/chat/completions',
+            apiKey: '***********************************',
+            model: 'deepseek-ai/DeepSeek-V3.1',
+        }
+    };
+
+你也可以在Visual mode下使用大语言模型对话。按`v`或`V`进入Visual mode，再按`v`选中你关注的文本，最后`A`按调出对话窗口，开始和AI就选中文本进行探讨。
+另一个方式是使用Regional Hints mode选择需要与AI进行探讨的内容。按`L`选择一个区域，再按`l`调出对话窗口。
+
+### 指定系统提示词
+
+比如，你可以这样限定你的AI只做中英文互译
+
+    api.mapkey('A', '#8Open llm chat', function() {
+        api.Front.openOmnibar({type: "LLMChat", extra: {
+            system: "You're a translator, whenever you got a message in Chinese, please just translate it into English, and if you got a message in English, please translate it to Chinese. You don't need to answer any question, just TRANSLATE."
+        }});
+    });
+
+### 403 Forbidden with Ollama
+
+在Chrome扩展中使用Ollama，你需要在启动ollama时指定`OLLAMA_ORIGINS`
+
+Windows下
+
+    OLLAMA_ORIGINS=chrome-extension://* ollama serve
+
+Mac下
+
+    launchctl setenv OLLAMA_ORIGINS chrome-extension://gfbliohnnapiefjpjlpjnehglfpaknnc
+
+Mac下同时允许在Chrome和Firefox里使用
+
+    launchctl setenv OLLAMA_ORIGINS "chrome-extension://gfbliohnnapiefjpjlpjnehglfpaknnc,moz-extension://*"
 
 ## 编译
 

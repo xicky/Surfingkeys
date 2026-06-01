@@ -3,13 +3,18 @@ import KeyboardUtils from '../common/keyboardUtils';
 import Mode from '../common/mode';
 import { debounce } from 'lodash';
 import {
+    filterByTitleOrUrl,
+    regexFromString,
+} from '../../common/utils.js';
+import {
+    attachFaviconToImgSrc,
     constructSearchURL,
     createElementWithContent,
-    filterByTitleOrUrl,
     getBrowserName,
     htmlEncode,
     parseAnnotation,
-    regexFromString,
+    safeDecodeURI,
+    safeDecodeURIComponent,
     scrollIntoViewIfNeeded,
     setSanitizedContent,
     showBanner,
@@ -18,6 +23,7 @@ import {
     toggleQuote,
 } from '../common/utils.js';
 import { RUNTIME, runtime } from '../common/runtime.js';
+import LLMChat from './llmchat';
 
 const separator = '➤';
 const separatorHtml = `<span class='separator'>${separator}</span>`;
@@ -40,6 +46,15 @@ function createOmnibar(front, clipboard) {
     self.mappings = new Trie();
     self.map_node = self.mappings;
 
+    function getPosition() {
+        let p = runtime.conf.omnibarPosition;
+        if (handler && handler.omnibarPosition) {
+            p = handler.omnibarPosition;
+        }
+        return p;
+    }
+
+    var savedFocused = -1;
     self.mappings.add(KeyboardUtils.encodeKeystroke("<Ctrl-d>"), {
         annotation: "Delete focused item from bookmark or history",
         feature_group: 8,
@@ -50,16 +65,24 @@ function createOmnibar(front, clipboard) {
                     uid: fi.uid
                 }, function(ret) {
                     if (ret.response === "Done") {
+                        var newFI = (getPosition() !== "bottom") ? fi.nextElementSibling : fi.previousElementSibling;
                         fi.remove();
+                        if (newFI) {
+                            self.focusItem(newFI);
+                        } else {
+                            savedFocused = (getPosition() !== "bottom") ?
+                                self.resultsDiv.querySelectorAll('#sk_omnibarSearchResult>ul>li').length : 0;
+                            self.input.dispatchEvent(new Event('input', { bubbles: true }));
+                        }
                     }
                 });
             }
         }
     });
 
-    function reopen(handler) {
+    function reopen(cb) {
         front.hidePopup();
-        setTimeout(handler, 100);
+        setTimeout(cb, 100);
     }
 
     const searchEngine = SearchEngine(self, front);
@@ -100,13 +123,14 @@ function createOmnibar(front, clipboard) {
         annotation: "Toggle Omnibar's position",
         feature_group: 8,
         code: function () {
+            const savedInput = self.input.value;
             if (runtime.conf.omnibarPosition === "bottom") {
                 runtime.conf.omnibarPosition = "middle";
             } else {
                 runtime.conf.omnibarPosition = "bottom";
             }
             reopen(function() {
-                _savedAargs.pref = self.input.value;
+                _savedAargs.pref = savedInput;
                 front.openOmnibar(_savedAargs);
             });
         }
@@ -224,9 +248,6 @@ function createOmnibar(front, clipboard) {
 
     var lastInput = "", handler, lastHandler = null;
     var ui = document.getElementById('sk_omnibar');
-    ui.onclick = function(e) {
-        self.input.focus();
-    };
 
     self.triggerInput = function() {
         var event = new Event('input', {
@@ -317,8 +338,8 @@ function createOmnibar(front, clipboard) {
         handler.onInput && handler.onInput.call(this);
     }
     function _onKeyDown(evt) {
-        if (handler && handler.onKeydown) {
-            handler.onKeydown.call(evt.target, evt) && evt.preventDefault();
+        if (handler && handler.onKeydown && handler.onKeydown.call(evt.target, evt)) {
+            return;
         }
         if (Mode.isSpecialKeyOf("<Esc>", evt.sk_keyName)) {
             front.hidePopup();
@@ -328,7 +349,10 @@ function createOmnibar(front, clipboard) {
             handler.tabbed = self.tabbed ^ evt.shiftKey;
             handler.onEnter() && front.hidePopup();
         } else if (evt.keyCode === KeyboardUtils.keyCodes.space) {
-            self.expandAlias(self.input.value, '') && evt.preventDefault();
+            const cursor = self.input.selectionStart;
+            const textBeforeCursor = self.input.value.substring(0, cursor);
+            const newQuery = self.input.value.substring(cursor);
+            self.expandAlias(textBeforeCursor, newQuery) && evt.preventDefault();
         } else if (evt.keyCode === KeyboardUtils.keyCodes.backspace) {
             self.collapseAlias() && evt.preventDefault();
         }
@@ -353,14 +377,36 @@ function createOmnibar(front, clipboard) {
         annotation: "Forward cycle through the candidates.",
         feature_group: 8,
         code: function () {
-            rotateResult(runtime.conf.omnibarPosition === "bottom");
+            rotateResult(getPosition() === "bottom");
         }
     });
     self.mappings.add(KeyboardUtils.encodeKeystroke("<Shift-Tab>"), {
         annotation: "Backward cycle through the candidates.",
         feature_group: 8,
         code: function () {
-            rotateResult(runtime.conf.omnibarPosition !== "bottom");
+            rotateResult(getPosition() !== "bottom");
+        }
+    });
+    self.mappings.add(KeyboardUtils.encodeKeystroke("<Ctrl-n>"), {
+        annotation: "Forward cycle through the input history.",
+        feature_group: 8,
+        code: function () {
+            if (handler && handler.rotateInput) {
+                handler.rotateInput(getPosition() === "bottom");
+            } else {
+                rotateResult(getPosition() === "bottom");
+            }
+        }
+    });
+    self.mappings.add(KeyboardUtils.encodeKeystroke("<Ctrl-p>"), {
+        annotation: "Backward cycle through the input history.",
+        feature_group: 8,
+        code: function () {
+            if (handler && handler.rotateInput) {
+                handler.rotateInput(getPosition() !== "bottom");
+            } else {
+                rotateResult(getPosition() !== "bottom");
+            }
         }
     });
     self.mappings.add(KeyboardUtils.encodeKeystroke("<Ctrl-'>"), {
@@ -379,7 +425,7 @@ function createOmnibar(front, clipboard) {
     };
 
     self.createURLItem = function(b, rxp) {
-        b.title = (b.title && b.title !== "") ? b.title : b.url;
+        b.title = (b.title && b.title !== "") ? b.title : safeDecodeURI(b.url);
         var type = "🔥", additional = "", uid = b.uid;
         if (b.hasOwnProperty('lastVisitTime')) {
             type = "🕜";
@@ -393,14 +439,20 @@ function createOmnibar(front, clipboard) {
         } else if(b.hasOwnProperty('width')) {
             type = "🔖";
             uid = "T" + b.windowId + ":" + b.id;
-        // } else if(b.type && /^\p{Emoji}$/u.test(b.type)) {
+            // } else if(b.type && /^\p{Emoji}$/u.test(b.type)) {
         } else if(b.type && b.type.length === 2 && b.type.charCodeAt(0) > 255) {
             type = b.type;
         }
-        var li = createElementWithContent('li',
-            `<div class="title">${type} ${self.highlight(rxp, htmlEncode(b.title))} ${additional}</div><div class="url">${self.highlight(rxp, b.url)}</div>`);
+        var li = createElementWithContent('li', `<div class="icon">${type}</div>`);
+        if (b.hasOwnProperty('favIconUrl')) {
+            li = createElementWithContent('li', `<img class="icon"/>`);
+            attachFaviconToImgSrc(b, li.querySelector('img'));
+        }
+        li.appendChild(createElementWithContent('div',
+            `<div class="title">${self.highlight(rxp, htmlEncode(b.title))} ${additional}</div><div class="url">${self.highlight(rxp, htmlEncode(safeDecodeURIComponent(b.url)))}</div>`, { "class": "text-container" }));
         li.uid = uid;
         li.url = b.url;
+        li._item = b;
         return li;
     };
 
@@ -447,6 +499,12 @@ function createOmnibar(front, clipboard) {
         _items = items;
         _showFolder = showFolder;
         _listResultPage();
+        if (savedFocused !== -1) {
+            const items = self.resultsDiv.querySelectorAll('#sk_omnibarSearchResult>ul>li');
+            self.focusItem(items[savedFocused]);
+            savedFocused = -1;
+        }
+
     };
     self.getItems = function() {
         return _items;
@@ -465,7 +523,7 @@ function createOmnibar(front, clipboard) {
         var query = self.input.value.trim();
         var rxp = null;
         if (query.length) {
-            rxp = regexFromString(query, true);
+            rxp = regexFromString(query, runtime.getCaseSensitive(query), true);
         }
         self.listResults(_page, function(b) {
             var li;
@@ -487,6 +545,7 @@ function createOmnibar(front, clipboard) {
 
     var _savedAargs;
     ui.onShow = function(args) {
+        handler = handlers[args.type];
         if (!self.input) {
             self.input = _createInput();
             document.querySelector("#sk_omnibarSearchArea").insertBefore(self.input, resultPageSpan);
@@ -497,8 +556,8 @@ function createOmnibar(front, clipboard) {
         if (getBrowserName() === "Safari-iOS") {
             runtime.conf.omnibarPosition = "bottom";
         }
-        ui.classList.add("sk_omnibar_" + runtime.conf.omnibarPosition);
-        if (runtime.conf.omnibarPosition === "bottom") {
+        ui.classList.add("sk_omnibar_" + getPosition());
+        if (getPosition() === "bottom") {
             self.resultsDiv.remove();
             ui.insertBefore(self.resultsDiv, document.querySelector("#sk_omnibarSearchArea"));
         } else {
@@ -507,12 +566,12 @@ function createOmnibar(front, clipboard) {
         }
 
         self.tabbed = (args.tabbed !== undefined) ? args.tabbed : true;
-        handler = handlers[args.type];
         self.input.focus();
         self.enter();
         if (args.pref) {
             self.input.value = args.pref;
         }
+        self.resultsDiv.className = "";
         handler.onOpen && handler.onOpen(args.extra);
         lastHandler = handler;
         handler = handler;
@@ -539,6 +598,20 @@ function createOmnibar(front, clipboard) {
         handler = null;
     };
 
+    self.isUrl = function (input) {
+      if (input.match(/\s+/)) {
+        return false;
+      }
+
+      if (input.match(/^https?:\/\//)) {
+        return true;
+      }
+
+      var regex = /^(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&\/=]*)$/;
+
+      return input.match(regex);
+    }
+
     self.openFocused = function() {
         var ret = false, fi = self.resultsDiv.querySelector('li.focused');
         var url;
@@ -546,8 +619,7 @@ function createOmnibar(front, clipboard) {
             url = fi.url;
         } else {
             url = self.input.value;
-            // TODO-yg: change url detection
-            if (url.indexOf(':') === -1) {
+            if (!self.isUrl(url)) {
                 url = searchEngine.aliases[runtime.conf.defaultSearchEngine].url + url;
             }
         }
@@ -579,7 +651,7 @@ function createOmnibar(front, clipboard) {
         if (!items || items.length === 0) {
             return;
         }
-        if (runtime.conf.omnibarPosition === "bottom") {
+        if (getPosition() === "bottom") {
             items.reverse();
         }
         var ul = document.createElement("ul");
@@ -606,10 +678,10 @@ function createOmnibar(front, clipboard) {
         self.resultsDiv.append(ul);
         items = self.resultsDiv.querySelectorAll("#sk_omnibarSearchResult>ul>li");
         if (runtime.conf.focusFirstCandidate || handler.focusFirstCandidate) {
-            var fi = (runtime.conf.omnibarPosition === "bottom") ? items.length - 1 : 0;
+            var fi = (getPosition() === "bottom") ? items.length - 1 : 0;
             items[fi].classList.add('focused');
         }
-        if (runtime.conf.omnibarPosition === "bottom" && items.length > 0) {
+        if (getPosition() === "bottom" && items.length > 0) {
             scrollIntoViewIfNeeded(items[items.length-1]);
         }
     };
@@ -664,7 +736,7 @@ function createOmnibar(front, clipboard) {
                 var results = response.tabs;
                 RUNTIME("getTopSites", null, function(response) {
                     results = results.concat(response.urls);
-                    results = filterByTitleOrUrl(results, self.input.value);
+                    results = filterByTitleOrUrl(results, self.input.value, runtime.getCaseSensitive(self.input.value));
                     self.listBookmarkFolders(function() {
                         RUNTIME('getAllURLs', {
                             maxResults: self.getHistoryCacheSize() - results.length,
@@ -681,24 +753,26 @@ function createOmnibar(front, clipboard) {
     self.addHandler('RecentlyClosed', OpenURLs(`Recently closed${separatorHtml}`, self, () => {
         return new Promise((resolve, reject) => {
             RUNTIME('getRecentlyClosed', null, function(response) {
-                resolve(filterByTitleOrUrl(response.urls, self.input.value));
+                resolve(filterByTitleOrUrl(response.urls, self.input.value, runtime.getCaseSensitive(self.input.value)));
             });
         });
     }));
     self.addHandler('TabURLs', OpenURLs(`Tab History${separatorHtml}`, self, () => {
         return new Promise((resolve, reject) => {
             RUNTIME('getTabURLs', null, function(response) {
-                resolve(filterByTitleOrUrl(response.urls, self.input.value));
+                resolve(filterByTitleOrUrl(response.urls, self.input.value, runtime.getCaseSensitive(self.input.value)));
             });
         });
     }));
     self.addHandler('Tabs', OpenTabs(self));
+    self.addHandler('CloseTabs', CloseTabs(self));
     self.addHandler('Windows', OpenWindows(self, front));
     self.addHandler('VIMarks', OpenVIMarks(self));
     self.addHandler('SearchEngine', searchEngine);
     self.addHandler('Commands', Commands(self, front));
     self.addHandler('OmniQuery', OmniQuery(self, front));
-    self.addHandler('UserURLs', OpenUserURLs(self));
+    self.addHandler('UserURLs', OpenUserURLs(self, front));
+    self.addHandler('LLMChat', LLMChat(self, front));
 
     front._actions['updateOmnibarResult'] = function(message) {
         self.listWords(message.words);
@@ -850,8 +924,10 @@ function OpenBookmarks(omnibar) {
         }
         omnibar.listURLs(items, true);
 
-        var items = omnibar.resultsDiv.querySelectorAll('#sk_omnibarSearchResult>ul>li');
-        omnibar.focusItem(items[lastFocused]);
+        if (!omnibar.resultsDiv.querySelector('li.focused')) {
+            var items = omnibar.resultsDiv.querySelectorAll('#sk_omnibarSearchResult>ul>li');
+            omnibar.focusItem(items[lastFocused]);
+        }
     };
 
     return self;
@@ -973,6 +1049,9 @@ function OpenURLs(prompt, omnibar, queryFn) {
         });
     };
     self.onOpen = function(arg) {
+        if (arg) {
+            omnibar.input.value = arg;
+        }
         sequenceNumber = 0;
         queryAndList();
     };
@@ -1004,11 +1083,11 @@ function OpenTabs(omnibar) {
         focusFirstCandidate: true,
     };
 
-    var queryInfo = {};
+    var getTabsArgs = {};
     self.getResults = function () {
         omnibar.cachedPromise = new Promise(function(resolve, reject) {
-            queryInfo.tabsThreshold = Math.min(runtime.conf.tabsThreshold, Math.ceil(window.innerWidth / 26));
-            RUNTIME('getTabs', queryInfo, function(response) {
+            getTabsArgs.tabsThreshold = Math.min(runtime.conf.tabsThreshold, Math.ceil(window.innerWidth / 26));
+            RUNTIME('getTabs', getTabsArgs, function(response) {
                 resolve(response.tabs);
             });
         });
@@ -1022,20 +1101,66 @@ function OpenTabs(omnibar) {
                 });
                 return true;
             };
-            queryInfo = {queryInfo: {currentWindow: false}};
+            getTabsArgs = {queryInfo: {currentWindow: false}};
         } else {
             self.prompt = `tabs${separatorHtml}`;
             self.onEnter = omnibar.openFocused.bind(self);
-            queryInfo = {};
+            getTabsArgs = {};
+            if (args && typeof(args.filter) === 'string') {
+                getTabsArgs.filter = args.filter;
+            }
         }
         self.getResults();
         self.onInput();
     };
     self.onInput = function() {
         omnibar.cachedPromise.then(function(cached) {
-            var filtered = filterByTitleOrUrl(cached, omnibar.input.value);
+            var filtered = filterByTitleOrUrl(cached, omnibar.input.value, runtime.getCaseSensitive(omnibar.input.value));
             omnibar.listURLs(filtered, false);
         });
+    };
+    return self;
+}
+
+function CloseTabs(omnibar) {
+    var self = {
+        focusFirstCandidate: true,
+    };
+
+    self.onOpen = function() {
+        self.prompt = `close tabs${separatorHtml}`;
+        omnibar.cachedPromise = new Promise(function(resolve) {
+            RUNTIME('getTabs', {queryInfo: {currentWindow: true}}, function(response) {
+                resolve(response.tabs);
+            });
+        });
+        self.onInput();
+    };
+    self.onInput = function() {
+        omnibar.cachedPromise.then(function(cached) {
+            var filtered = filterByTitleOrUrl(cached, omnibar.input.value, runtime.getCaseSensitive(omnibar.input.value));
+            filtered.forEach(function(tab) {
+                try {
+                    var u = new URL(tab.url);
+                    tab.url = u.origin + u.pathname;
+                } catch (e) {}
+            });
+            omnibar.listURLs(filtered, false);
+        });
+    };
+    self.onEnter = function() {
+        var items = omnibar.resultsDiv.querySelectorAll('#sk_omnibarSearchResult>ul>li');
+        var tabIds = [];
+        items.forEach(function(li) {
+            if (li.uid && li.uid[0] === 'T') {
+                var parts = li.uid.substr(1).split(":");
+                tabIds.push(parseInt(parts[1]));
+            }
+        });
+        if (tabIds.length > 0) {
+            RUNTIME('closeTabByIds', {tabIds: tabIds});
+        }
+        return true;
     };
     return self;
 }
@@ -1078,7 +1203,7 @@ function OpenWindows(omnibar, front) {
             const query = omnibar.input.value;
             let rxp = null;
             if (query && query.length) {
-                rxp = regexFromString(query, false);
+                rxp = regexFromString(query, runtime.getCaseSensitive(query), false);
                 filtered = cached.filter(function(w) {
                     for (const t of w.tabs) {
                         if (rxp.test(t.title) || rxp.test(t.url)) {
@@ -1088,7 +1213,7 @@ function OpenWindows(omnibar, front) {
                     return false;
                 });
             }
-            rxp = regexFromString(query, true);
+            rxp = regexFromString(query, runtime.getCaseSensitive(query), true);
             omnibar.listResults(filtered, function(w) {
                 const li = createElementWithContent('li');
                 li.windowId = parseInt(w.id);
@@ -1202,7 +1327,8 @@ function SearchEngine(omnibar, front) {
     };
     function listSuggestions(suggestions) {
         omnibar.detectAndInsertURLItem(omnibar.input.value, suggestions);
-        var rxp = regexFromString(encodeURIComponent(omnibar.input.value), true);
+        const query = encodeURIComponent(omnibar.input.value);
+        var rxp = regexFromString(query, runtime.getCaseSensitive(query), true);
         omnibar.listResults(suggestions, function (w) {
             if (w.hasOwnProperty('html')) {
                 return omnibar.createItemFromRawHtml(w);
@@ -1257,10 +1383,10 @@ function SearchEngine(omnibar, front) {
             url: message.url,
             suggestionURL: message.suggestionURL
         };
-        const searchEngineIconStorageKey = `surfingkeys.searchEngineIcon.${message.alias}`;
+        const searchEngineIconStorageKey = `surfingkeys.searchEngineIcon.${message.prompt}`;
         const searchEngineIcon = localStorage.getItem(searchEngineIconStorageKey);
         if (searchEngineIcon) {
-            self.aliases[message.alias].prompt = `<img src="${searchEngineIcon}" alt=${message.prompt} style="width: 20px;" />`;
+            self.aliases[message.alias].prompt = `<img src="${searchEngineIcon}" alt="${message.prompt}" style="width: 20px;" />`;
         } else if (front.topOrigin.startsWith("http")){
             let iconUrl;
             if (message.options?.favicon_url) {
@@ -1274,8 +1400,10 @@ function SearchEngine(omnibar, front) {
             RUNTIME('requestImage', {
                 url: iconUrl.href,
             }, function(response) {
-                localStorage.setItem(searchEngineIconStorageKey, response.text);
-                self.aliases[message.alias].prompt = `<img src="${response.text}" alt=${message.prompt} style="width: 20px;" />`;
+                if (response) {
+                    localStorage.setItem(searchEngineIconStorageKey, response.text);
+                    self.aliases[message.alias].prompt = `<img src="${response.text}" alt="${message.prompt}" style="width: 20px;" />`;
+                }
             });
         }
     };
@@ -1285,7 +1413,7 @@ function SearchEngine(omnibar, front) {
     front._actions['getSearchAliases'] = function (message) {
         front.postMessage({
             aliases: self.aliases,
-            responseToContent: message.commandToFrontend,
+            toContent: true,
             id: message.id
         });
     };
@@ -1295,13 +1423,20 @@ function SearchEngine(omnibar, front) {
 
 function Commands(omnibar, front) {
     var self = {
-        focusFirstCandidate: true,
+        focusFirstCandidate: false,
         prompt: ':',
     }, items = {};
 
     var historyInc = 0;
 
     self.onOpen = function() {
+        omnibar.resultsDiv.className = "commands";
+
+        if (omnibar.input.value.length) {
+            omnibar.triggerInput();
+            return;
+        }
+
         historyInc = -1;
         RUNTIME('getSettings', {
             key: 'cmdHistory'
@@ -1341,7 +1476,7 @@ function Commands(omnibar, front) {
         var ret = false;
         var cmdline = omnibar.input.value;
         if (cmdline.length) {
-            runtime.updateHistory('cmd', cmdline);
+            RUNTIME('updateInputHistory', { cmd: cmdline });
             execute(cmdline);
             omnibar.input.value = "";
         }
@@ -1376,10 +1511,7 @@ function Commands(omnibar, front) {
             var meta = items[cmd];
             meta.code.call(meta.code, args);
         } else {
-            front.contentCommand({
-                action: 'executeScript',
-                cmdline: cmdline
-            });
+            showBanner(`Unsupported command: ${cmdline}.`, 3000);
         }
     }
 
@@ -1410,7 +1542,7 @@ function OmniQuery(omnibar, front) {
     }
     var _words;
     self.onOpen = function(arg) {
-        if (arg) {
+        if (arg && document.dictEnabled === undefined) {
             omnibar.input.value = arg;
             front.contentCommand({
                 action: 'omnibar_query_entered',
@@ -1451,7 +1583,7 @@ function OmniQuery(omnibar, front) {
     return self;
 }
 
-function OpenUserURLs(omnibar) {
+function OpenUserURLs(omnibar, front) {
     var self = {
         focusFirstCandidate: true,
         prompt: `UserURLs${separatorHtml}`
@@ -1467,16 +1599,19 @@ function OpenUserURLs(omnibar) {
         var query = omnibar.input.value;
         var urls = [];
 
-        for (var m of _items) {
-            if (query === "" || m.title.indexOf(query) !== -1 || m.url.indexOf(query) !== -1) {
-                urls.push({
-                    title: m.title,
-                    type: '🍆',
-                    url: m.url
-                });
-            }
-        }
+        urls = filterByTitleOrUrl(_items, query, runtime.getCaseSensitive(query));
         omnibar.listURLs(urls, false);
+    };
+    self.onEnter = function() {
+        var fi = omnibar.resultsDiv.querySelector('li.focused');
+        front.contentCommand({
+            action: 'userURLs_entered',
+            item: fi ? fi._item : { url: omnibar.input.value },
+            tabbed: this.tabbed,
+            ctrlKey: !this.activeTab,
+            shiftKey: omnibar.tabbed ^ this.tabbed,
+        });
+        return this.activeTab;
     };
     return self;
 }

@@ -161,6 +161,7 @@ var suppressScrollEvent = 0, _listenedEvents = {
         });
     },
     "scroll": function (event) {
+        handleStack("scroll", event);
         if (suppressScrollEvent > 0) {
             event.stopImmediatePropagation();
             event.preventDefault();
@@ -231,19 +232,16 @@ Mode.init = (cb)=> {
 
 
 Mode.showStatus = function() {
-    if (runtime.conf.showModeStatus && document.hasFocus() && mode_stack.length) {
+    if (document.hasFocus() && mode_stack.length) {
         var cm = mode_stack[0];
-        var sl = cm.statusLine;
-        if (sl === undefined) {
-            sl = cm.name;
-        }
+        var sl = cm.statusLine || (runtime.conf.showModeStatus ? cm.name : "");
         if (sl !== "" && window !== top && !isInUIFrame()) {
             var pathname = window.location.pathname.split('/');
             if (pathname.length) {
                 sl += " - frame: " + pathname[pathname.length - 1];
             }
         }
-        dispatchSKEvent('showStatus', [0, sl]);
+        dispatchSKEvent("front", ['showStatus', [sl]]);
     }
 };
 
@@ -252,7 +250,7 @@ Mode.finish = function (mode) {
     if (mode.map_node !== mode.mappings || mode.pendingMap != null || mode.repeats) {
         mode.map_node = mode.mappings;
         mode.pendingMap = null;
-        mode.isTrustedEvent && dispatchSKEvent('hideKeystroke');
+        mode.isTrustedEvent && dispatchSKEvent("front", ['hideKeystroke']);
         if (mode.repeats) {
             mode.repeats = "";
         }
@@ -291,7 +289,7 @@ Mode.handleMapKey = function(event, onNoMatched) {
     ) {
         // reset only after target action executed or cancelled
         this.repeats += key;
-        this.isTrustedEvent && dispatchSKEvent('showKeystroke', [key, this]);
+        this.isTrustedEvent && dispatchSKEvent("front", ['showKeystroke', key, this]);
         event.sk_stopPropagation = true;
     } else {
         var last = this.map_node;
@@ -306,21 +304,30 @@ Mode.handleMapKey = function(event, onNoMatched) {
                 if (code.length) {
                     // bound function needs arguments
                     this.pendingMap = code;
-                    this.isTrustedEvent && dispatchSKEvent('showKeystroke', [key, this]);
+                    this.isTrustedEvent && dispatchSKEvent("front", ['showKeystroke', key, this]);
                     event.sk_stopPropagation = true;
                 } else {
                     this.setLastKeys && this.setLastKeys(this.map_node.meta.word);
                     RUNTIME.repeats = parseInt(this.repeats) || 1;
                     event.sk_stopPropagation = (!this.map_node.meta.stopPropagation
                         || this.map_node.meta.stopPropagation(key));
-                    while(RUNTIME.repeats > 0) {
-                        code();
-                        RUNTIME.repeats--;
+                    if (RUNTIME.repeats > runtime.conf.repeatThreshold) {
+                        dispatchSKEvent("front", ['showDialog', `Do you really want to repeat this action (${this.map_node.meta.annotation}) ${RUNTIME.repeats} times?`, () => {
+                            while(RUNTIME.repeats > 0) {
+                                code();
+                                RUNTIME.repeats--;
+                            }
+                        }]);
+                    } else {
+                        while(RUNTIME.repeats > 0) {
+                            code();
+                            RUNTIME.repeats--;
+                        }
                     }
                     actionDone = Mode.finish(thisMode);
                 }
             } else {
-                this.isTrustedEvent && dispatchSKEvent('showKeystroke', [key, this]);
+                this.isTrustedEvent && dispatchSKEvent("front", ['showKeystroke', key, this]);
                 event.sk_stopPropagation = true;
             }
         }

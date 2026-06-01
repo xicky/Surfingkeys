@@ -1,26 +1,28 @@
 import {
     filterByTitleOrUrl,
-} from '../content_scripts/common/utils.js';
+} from '../common/utils.js';
+import llmClients from './llm.js';
+
 function request(url, onReady, headers, data, onException) {
     headers = headers || {};
-    return new Promise(function(acc, rej) {
-        var xhr = new XMLHttpRequest();
-        var method = (data !== undefined) ? "POST" : "GET";
-        xhr.open(method, url);
-        for (var h in headers) {
-            xhr.setRequestHeader(h, headers[h]);
-        }
-        xhr.onload = function() {
-            // status from file:/// is always 0
-            if (xhr.status === 200 || xhr.status === 0) {
-                acc(xhr.responseText);
-            } else {
-                rej(xhr.status);
-            }
-        };
-        xhr.onerror = rej.bind(null, xhr);
-        xhr.send(data);
-    }).then(onReady).catch(function(exp) {
+    const CHARTSET_RE = /(?:charset|encoding)\s*=\s*['"]? *([\w\-]+)/i;
+
+    fetch(url, {
+        method: (data !== undefined) ? "POST" : "GET",
+        headers,
+        body: data,
+    }).then(res => {
+        const cs = res.headers.get('content-type') ? res.headers.get('content-type').match(CHARTSET_RE) : [];
+
+        return Promise.all([
+            Promise.resolve(cs && cs.length > 1 ? cs[1] : "utf-8"),
+            res.arrayBuffer()
+        ])
+    }).then(res => {
+        const decoder = new TextDecoder(res[0]);
+        const content = decoder.decode(res[1]);
+        onReady(content);
+    }).catch(exp => {
         onException && onException(exp);
     });
 }
@@ -61,8 +63,11 @@ function _save(storage, data, cb) {
         // don't store snippets from localPath into sync storage, since sync storage has its quota.
         if (data.localPath) {
             delete data.snippets;
+            delete data.localPath;
         }
-        storage.set(data, cb);
+        if (Object.keys(data).length > 1) {
+            storage.set(data, cb);
+        }
     } else {
         if (data.localPath) {
             delete data.snippets;
@@ -195,6 +200,8 @@ var Gist = (function() {
 function start(browser) {
     var self = {};
 
+    const isMV3 = chrome.runtime.getManifest().manifest_version === 3;
+
     var tabHistory = [],
         tabHistoryIndex = 0,
         chromelikeNewTabPosition = 0,
@@ -208,8 +215,8 @@ function start(browser) {
     var newTabUrl = browser._setNewTabUrl();
 
     var conf = {
+        llm: { },
         focusAfterClosed: "right",
-        repeatThreshold: 99,
         tabsMRUOrder: true,
         newTabPosition: 'default',
         showTabIndices: false,
@@ -268,7 +275,7 @@ function start(browser) {
                 set.autoproxy_hosts = [set.autoproxy_hosts];
             }
             if (set.localPath) {
-                request(set.localPath, function(resp) {
+                request(appendNonce(set.localPath), function(resp) {
                     set.snippets = resp;
                     cb(set);
                 }, undefined, undefined, function (po) {
@@ -303,19 +310,22 @@ function start(browser) {
     chrome.tabs.onRemoved.addListener(removeTab);
     function _setScrollPos_bg(tabId) {
         if (tabMessages.hasOwnProperty(tabId)) {
-            var message = tabMessages[tabId];
-            chrome.tabs.executeScript(tabId, {
-                code: "_setScrollPos(" + message.scrollLeft + ", " + message.scrollTop + ")"
+            const message = tabMessages[tabId];
+            sendTabMessage(tabId, 0, {
+                subject: "setScrollPos",
+                scrollLeft: message.scrollLeft,
+                scrollTop: message.scrollTop
             });
             delete tabMessages[tabId];
         }
     }
 
-    function sendTabMessage(tabId, frameId, message, cb) {
-        if (frameId === -1) {
-            chrome.tabs.sendMessage(tabId, message);
-        } else {
-            chrome.tabs.sendMessage(tabId, message, {frameId: frameId});
+    function sendTabMessage(tabId, frameId, message) {
+        const opts = (frameId === -1) ? undefined : {frameId: frameId};
+        // use catch to suppress Uncaught (in promise) Error on sending message to unsupported tabs like chrome://
+        const p = chrome.tabs.sendMessage(tabId, message, opts);
+        if (p) {
+            p.catch((e) => {});
         }
     }
     var _lastActiveTabId = null;
@@ -344,7 +354,6 @@ function start(browser) {
                 changeInfo
             });
         }
-        _setScrollPos_bg(tabId);
     });
     chrome.windows.onFocusChanged.addListener(function(w) {
         getActiveTab(function(tab) {
@@ -353,8 +362,6 @@ function start(browser) {
     });
 
     chrome.tabs.onCreated.addListener(function(tab) {
-        _setScrollPos_bg(tab.id);
-
         _updateTabIndices();
     });
     chrome.tabs.onMoved.addListener(function() {
@@ -376,7 +383,6 @@ function start(browser) {
         historyTabAction = false;
         chromelikeNewTabPosition = 0;
 
-        _setScrollPos_bg(activeInfo.tabId);
         _updateTabIndices();
     });
     chrome.tabs.onDetached.addListener(function() {
@@ -442,11 +448,8 @@ function start(browser) {
         }
         sendResponse(result);
     }
-    chrome.runtime.onMessage.addListener(function (_message, _sender, _sendResponse) {
+    function handleMessage(_message, _sender, _sendResponse) {
         if (self.hasOwnProperty(_message.action)) {
-            if (_message.repeats > conf.repeatThreshold) {
-                _message.repeats = conf.repeatThreshold;
-            }
             var result = self[_message.action](_message, _sender, _sendResponse);
             if (_message.needResponse) {
                 if (result) {
@@ -461,18 +464,31 @@ function start(browser) {
         } else {
             console.log("[unexpected runtime message] " + JSON.stringify(_message));
         }
-    });
+    }
+    chrome.runtime.onMessage.addListener(handleMessage);
+    if (isMV3) {
+        chrome.runtime.onUserScriptMessage.addListener((m, s, r) => {
+            m.fromUserScript = true;
+            handleMessage(m, s, r);
+        });
+        chrome.runtime.onInstalled.addListener((e) => {
+            chrome.userScripts.configureWorld({
+                csp: 'script-src \'self\' \'unsafe-eval\'',
+                messaging: true
+            });
+        });
+    }
 
     function _updateSettings(diffSettings, afterSet) {
         diffSettings.savedAt = new Date().getTime();
         _save(chrome.storage.local, diffSettings, function() {
+            _save(chrome.storage.sync, diffSettings, function() {
+                if (chrome.runtime.lastError) {
+                    var error = chrome.runtime.lastError.message;
+                }
+            });
             if (afterSet) {
                 afterSet();
-            }
-        });
-        _save(chrome.storage.sync, diffSettings, function() {
-            if (chrome.runtime.lastError) {
-                var error = chrome.runtime.lastError.message;
             }
         });
     }
@@ -537,7 +553,7 @@ function start(browser) {
         loadSettings('blocklist', function(data) {
             var origin = ".*";
             var senderOrigin = sender.origin || new URL(getSenderUrl(sender)).origin;
-            if (chrome.extension.getURL("/").indexOf(senderOrigin) !== 0 && senderOrigin !== "null") {
+            if (chrome.runtime.getURL("/").toLowerCase().indexOf(senderOrigin.toLowerCase()) !== 0 && senderOrigin !== "null") {
                 origin = senderOrigin;
             }
             if (data.blocklist.hasOwnProperty(origin)) {
@@ -556,7 +572,7 @@ function start(browser) {
     };
     self.toggleMouseQuery = function(message, sender, sendResponse) {
         loadSettings('mouseSelectToQuery', function(data) {
-            if (sender.tab && sender.tab.url.indexOf(chrome.extension.getURL("/")) !== 0) {
+            if (sender.tab && sender.tab.url.indexOf(chrome.runtime.getURL("/")) !== 0) {
                 var mouseSelectToQuery = data.mouseSelectToQuery || [];
                 var idx = mouseSelectToQuery.indexOf(message.origin);
                 if (idx === -1) {
@@ -569,10 +585,12 @@ function start(browser) {
         });
     };
     self.getState = function(message, sender, sendResponse) {
-        loadSettings(['blocklist', 'noPdfViewer'], function(data) {
+        loadSettings(['blocklist', 'noPdfViewer', 'proxyMode', 'proxy'], function(data) {
             if (sender.tab) {
                 _response(message, sendResponse, {
                     noPdfViewer: data.noPdfViewer,
+                    proxyMode: data.proxyMode,
+                    proxy: data.proxy,
                     state: _getState(data, new URL(getSenderUrl(sender)), message.blocklistPattern, message.lurkingPattern)
                 });
             }
@@ -621,10 +639,22 @@ function start(browser) {
         });
     };
 
+    function appendNonce(url) {
+        if (/https?:\/\//.test(url)) {
+            url = url.replace(/\?$/, "");
+            let u = new URL(url);
+            let con = u.search ? "&" : "?";
+            url = `${url}${con}nonce=${new Date().getTime()}`;
+        }
+        return url;
+    }
+
     function _loadSettingsFromUrl(url, cb) {
-        request(url, function(resp) {
+        request(appendNonce(url), function(resp) {
             _updateAndPostSettings({localPath: url, snippets: resp});
-            cb({status: "Succeeded", snippets: resp});
+            registerUserScript(resp, () => {
+                cb({status: "Succeeded", snippets: resp});
+            });
         }, undefined, undefined, function (po) {
             cb({status: "Failed"});
         });
@@ -650,7 +680,7 @@ function start(browser) {
         tabs = tabs.filter(function(b) {
             return b.url;
         });
-        return filterByTitleOrUrl(tabs, query);
+        return filterByTitleOrUrl(tabs, query, false);
     }
     self.getRecentlyClosed = function(message, sender, sendResponse) {
         chrome.sessions.getRecentlyClosed({}, function(sessions) {
@@ -719,12 +749,7 @@ function start(browser) {
         var tab = sender.tab;
         var queryInfo = message.queryInfo || {};
         chrome.tabs.query(queryInfo, function(tabs) {
-            tabs = _filterByTitleOrUrl(tabs, message.query);
-            if (message.query && message.query.length) {
-                tabs = tabs.filter(function(b) {
-                    return b.title.indexOf(message.query) !== -1 || (b.url && b.url.indexOf(message.query) !== -1);
-                });
-            }
+            tabs = _filterByTitleOrUrl(tabs, message.filter);
             if (tabs.length > message.tabsThreshold && conf.tabsMRUOrder) {
                 // only remove current tab when tabsMRUOrder is enabled.
                 tabs = tabs.filter(function(b) {
@@ -732,8 +757,8 @@ function start(browser) {
                 });
                 tabs.sort(function(x, y) {
                     // Shift tabs without "last access" data to the end
-                    var a = tabActivated[x.id];
-                    var b = tabActivated[y.id];
+                    var a = x.lastAccessed || tabActivated[x.id];
+                    var b = y.lastAccessed || tabActivated[y.id];
 
                     if (!isFinite(a) && !isFinite(b)) {
                         return 0;
@@ -755,12 +780,68 @@ function start(browser) {
             });
         });
     };
+    self.createTabGroup = function(message, sender, sendResponse) {
+        chrome.tabs.group({tabIds: [sender.tab.id], groupId: message.groupId}, function(groupId) {
+            if (message.title || message.color) {
+                chrome.tabGroups.update(groupId, {
+                    title: message.title,
+                    color: message.color
+                });
+            }
+        });
+    };
+    self.ungroupTab = function(message, sender, sendResponse) {
+        chrome.tabs.ungroup([sender.tab.id]);
+    };
+    self.collapseGroup = function(message, sender, sendResponse) {
+        chrome.tabGroups.update(message.groupId, {collapsed: message.collapsed});
+    };
+    self.getTabGroups = function(message, sender, sendResponse) {
+        chrome.tabGroups.query({}, function(groups) {
+            let activeGroup = -1;
+            // retrieve all tabs of each group
+            chrome.tabs.query({}, function(tabs) {
+                const tabsInGroup = {};
+                tabs.forEach(function(tab) {
+                    if (tab.groupId && tab.groupId !== (chrome.tabGroups?.TAB_GROUP_ID_NONE ?? -1)) {
+                        if (!tabsInGroup[tab.groupId]) {
+                            tabsInGroup[tab.groupId] = [];
+                        }
+                        if (tab.id === sender.tab.id) {
+                            activeGroup = tab.groupId;
+                        }
+                        tabsInGroup[tab.groupId].push({
+                            id: tab.id,
+                            title: tab.title,
+                            url: tab.url,
+                            favIconUrl: tab.favIconUrl,
+                            active: tab.active,
+                            index: tab.index
+                        });
+                    }
+                });
+
+                groups = groups.filter((g) => !g.hermit);
+                groups.forEach(function(group) {
+                    group.tabs = tabsInGroup[group.id] || [];
+                    group.active = group.id === activeGroup;
+                });
+
+                _response(message, sendResponse, {
+                    groups: groups
+                });
+            });
+        });
+    };
     self.togglePinTab = function(message, sender, sendResponse) {
         getActiveTab(function(tab) {
             return chrome.tabs.update(tab.id, {
                 pinned: !tab.pinned
             });
         });
+    };
+    self.closeTabByIds = function(message, sender, sendResponse) {
+        chrome.tabs.remove(message.tabIds);
     };
     function focusTab(windowId, tabId) {
         chrome.windows.update(windowId, {
@@ -781,7 +862,7 @@ function start(browser) {
         }
     };
     self.focusTabByIndex = function(message, sender, sendResponse) {
-        var queryInfo = message.queryInfo || {};
+        var queryInfo = message.queryInfo || {currentWindow: true};
         chrome.tabs.query(queryInfo, function(tabs) {
             if (message.repeats > 0 && message.repeats <= tabs.length) {
                 chrome.tabs.update(tabs[message.repeats - 1].id, {
@@ -937,7 +1018,13 @@ function start(browser) {
         });
     };
     self.openLast = function(message, sender, sendResponse) {
-        chrome.sessions.restore();
+        if (browser.name === "Safari") {
+            chrome.runtime.sendNativeMessage("application.id", {command: "reopenLastTab"}, function(response) {
+                _response(message, sendResponse, response);
+            });
+        } else {
+            chrome.sessions.restore();
+        }
     };
     self.duplicateTab = function(message, sender, sendResponse) {
         chrome.tabs.duplicate(sender.tab.id, function() {
@@ -1109,12 +1196,13 @@ function start(browser) {
     self.openLink = function(message, sender, sendResponse) {
         var url = normalizeURL(message.url);
         if (url.startsWith("javascript:")) {
-            chrome.tabs.executeScript(sender.tab.id, {
-                code: url.substr(11)
+            sendTabMessage(sender.tab.id, 0, {
+                subject: "showBanner",
+                message: "JavaScript URLs are not allowed in such operation."
             });
         } else {
             if (message.tab.tabbed) {
-                if (sender.frameId !== 0 && chrome.extension.getURL("pages/frontend.html") === sender.url
+                if (sender.frameId !== 0 && chrome.runtime.getURL("pages/frontend.html") === sender.url
                     || !sender.tab) {
                     // if current call was made from Omnibar, the sender.tab may be stale,
                     // as sender was bound when port was created.
@@ -1143,6 +1231,76 @@ function start(browser) {
         message.url = 'view-source:' + sender.tab.url;
         self.openLink(message, sender, sendResponse);
     };
+    function registerUserScript(snippets, callback) {
+        if (!isUserScriptsAvailable()) {
+            callback && callback();
+            return;
+        }
+        const userScriptId = "settingsSnippets";
+        const invokeCallback = () => {
+            if (chrome.runtime.lastError) {
+                console.error("userScripts API error:", chrome.runtime.lastError);
+            }
+            callback && callback();
+        };
+        if (snippets) {
+            chrome.userScripts.getScripts({ids:[userScriptId]}, (r) => {
+                if (chrome.runtime.lastError) {
+                    console.error("userScripts.getScripts error:", chrome.runtime.lastError);
+                    callback && callback();
+                    return;
+                }
+                const code = `import('./api.js').then((module) => {module.default("${chrome.runtime.getURL("/")}", (api, settings) => {${snippets}\n})});`;
+                const registerSettingSnippets = () => {
+                    chrome.userScripts.register([{
+                        allFrames: true,
+                        id: userScriptId,
+                        matches: ['*://*/*', 'file:///*'],
+                        js: [{code}]
+                    }], invokeCallback);
+                };
+                if (r.length > 0) {
+                    if (r[0].js[0].code !== code) {
+                        chrome.userScripts.unregister({ids:[userScriptId]}, registerSettingSnippets);
+                    } else {
+                        callback && callback();
+                    }
+                } else {
+                    registerSettingSnippets();
+                }
+            });
+        } else {
+            chrome.userScripts.getScripts({ids:[userScriptId]}, (r) => {
+                if (chrome.runtime.lastError) {
+                    console.error("userScripts.getScripts error:", chrome.runtime.lastError);
+                    callback && callback();
+                    return;
+                }
+                if (r.length > 0) {
+                    chrome.userScripts.unregister({ids:[userScriptId]}, invokeCallback);
+                } else {
+                    callback && callback();
+                }
+            });
+        }
+    }
+
+    function onFullSettingsRequested(data, callback) {
+        data.isMV3 = isMV3;
+        data.useNeovim = browser.nvimServer && browser.nvimServer.instance;
+        data.isUserScriptsAvailable = isUserScriptsAvailable();
+        if (isMV3) {
+            data.showAdvanced = data.isUserScriptsAvailable && data.showAdvanced;
+        }
+
+        if (data.isUserScriptsAvailable && data.showAdvanced) {
+            registerUserScript(data.snippets, callback);
+        } else if (data.isUserScriptsAvailable) {
+            registerUserScript(null, callback);
+        } else {
+            callback && callback();
+        }
+    }
     self.getSettings = function(message, sender, sendResponse) {
         var pf = loadSettings;
         if (message.key === "RAW") {
@@ -1150,12 +1308,27 @@ function start(browser) {
             message.key = "";
         }
         pf(message.key, function(data) {
+            if (message.key === undefined) {
+                onFullSettingsRequested(data);
+            }
+
             _response(message, sendResponse, {
                 settings: data
             });
         });
     };
+    function isUserScriptsAvailable() {
+        try {
+            if (chrome.userScripts) {
+                return true;
+            }
+        } catch {
+            return false;
+        }
+        return false;
+    }
     self.updateSettings = function(message, sender, sendResponse) {
+        let error = "";
         if (message.scope === "snippets") {
             // For settings from snippets, don't broadcast the update
             // neither persist into storage
@@ -1164,8 +1337,84 @@ function start(browser) {
                     conf[k] = message.settings[k];
                 }
             }
+            const llmConf = conf.llm;
+            if (llmConf.ollama && llmConf.ollama.model) {
+                llmClients.ollama.model = llmConf.ollama.model;
+            }
+            if (llmConf.deepseek && llmConf.deepseek.apiKey) {
+                llmClients.deepseek.apiKey = llmConf.deepseek.apiKey;
+                llmClients.deepseek.model = llmConf.deepseek.model;
+                delete message.settings.llm.deepseek;
+            }
+            if (llmConf.gemini && llmConf.gemini.apiKey) {
+                llmClients.gemini.apiKey = llmConf.gemini.apiKey;
+                llmClients.gemini.model = llmConf.gemini.model;
+                delete message.settings.llm.gemini;
+            }
+            if (llmConf.bedrock
+                && llmConf.bedrock.accessKeyId
+                && llmConf.bedrock.secretAccessKey
+                && llmConf.bedrock.model) {
+                llmClients.bedrock.init(llmConf.bedrock);
+                delete message.settings.llm.bedrock;
+            }
+            if (llmConf.custom && llmConf.custom.serviceUrl && llmConf.custom.apiKey && llmConf.custom.model) {
+                llmClients.custom.serviceUrl = llmConf.custom.serviceUrl;
+                llmClients.custom.apiKey = llmConf.custom.apiKey;
+                llmClients.custom.model = llmConf.custom.model;
+                delete message.settings.llm.custom;
+            }
+            return { error };
         } else {
-            _updateAndPostSettings(message.settings);
+            if (message.settings.showAdvanced && isMV3) {
+                if (isUserScriptsAvailable()) {
+                    chrome.userScripts.configureWorld({
+                        csp: 'script-src \'self\' \'unsafe-eval\'',
+                        messaging: true
+                    });
+                    _updateAndPostSettings(message.settings);
+                    registerUserScript(message.settings.snippets, () => {
+                        _response(message, sendResponse, { error });
+                    });
+                    return;
+                } else {
+                    error = "Advanced mode is only available when Developer mode is turned on from chrome://extensions/.";
+                }
+            } else {
+                _updateAndPostSettings(message.settings);
+            }
+        }
+        return { error };
+    };
+    self.updateInputHistory = function(message, sender, sendResponse) {
+        let key = undefined, value;
+        for (var k in message) {
+            key = k + "History";
+            value = message[k];
+            break;
+        }
+        if (key) {
+            loadSettings(key, function(data) {
+                let curr = data[key] || [];
+                let toUpdate = {};
+                if (value.constructor.name === "Array") {
+                    toUpdate[key] = value;
+                    _updateAndPostSettings(toUpdate);
+                } else if (value.trim().length && value !== ".") {
+                    curr = curr.filter(function(c) {
+                        return c.trim().length && c !== value && c !== ".";
+                    });
+                    curr.unshift(value);
+                    if (curr.length > 50) {
+                        curr.pop();
+                    }
+                    toUpdate[key] = curr;
+                    _updateAndPostSettings(toUpdate);
+                }
+                _response(message, sendResponse, {
+                    history: curr
+                });
+            });
         }
     };
     self.setSurfingkeysIcon = function(message, sender, sendResponse) {
@@ -1175,7 +1424,8 @@ function start(browser) {
         } else if (message.status === "lurking") {
             icon = "icons/48-l.png";
         }
-        chrome.browserAction.setIcon({
+        const browserAction = isMV3 ? chrome.action : chrome.browserAction;
+        browserAction.setIcon({
             path: icon,
             tabId: (sender.tab ? sender.tab.id : undefined)
         });
@@ -1185,34 +1435,52 @@ function start(browser) {
             _response(message, sendResponse, {
                 text: res
             });
-        }, message.headers, message.data);
+        }, message.headers, message.data, (e) => {
+            _response(message, sendResponse, {
+                error: e.toString()
+            });
+        });
     };
     self.requestImage = function(message, sender, sendResponse) {
-        const img = document.createElement("img");
-        img.crossOrigin = "Anonymous";
-        img.src = message.url;
-        img.onload = () => {
-            const canvas = document.createElement('canvas');
-            canvas.height = img.naturalHeight;
-            canvas.width = img.naturalWidth;
+        fetch(message.url, {
+            method: "GET"
+        }).then(res => {
+            return res.blob()
+        }).then(blob => {
+            return createImageBitmap(blob)
+        }).then(img => {
+            const canvas = new OffscreenCanvas(img.width, img.height)
             const ctx = canvas.getContext('2d');
-
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            _response(message, sendResponse, {
-                text: canvas.toDataURL()
+            ctx.drawImage(img, 0,0, canvas.width, canvas.height);
+            canvas.convertToBlob().then(blob => {
+                const fr = new FileReader();
+                fr.onload = function(e) {
+                    _response(message, sendResponse, {
+                        text: e.target.result
+                    });
+                }
+                fr.readAsDataURL(blob);
             });
-        };
-
+        }).catch(exp => {
+            _response(message, sendResponse, {
+                text: ""
+            });
+        });
     };
     self.nextFrame = function(message, sender, sendResponse) {
-        var tid = sender.tab.id;
-        chrome.tabs.executeScript(tid, {
-            allFrames: true,
-            matchAboutBlank: true,
-            runAt: "document_start",
-            code: "typeof(getFrameId) === 'function' && getFrameId()"
+        const tid = sender.tab.id;
+        chrome.scripting.executeScript({
+            target: {
+                allFrames: true,
+                tabId: tid,
+            },
+            func: () => {
+                return typeof(getFrameId) === 'function' ? getFrameId() : 0;
+            },
         }, function(framesInTab) {
-            framesInTab = framesInTab.filter(function(frameId) {
+            framesInTab = framesInTab.map((res) => {
+                return res.result;
+            }).filter((frameId) => {
                 return frameId;
             });
 
@@ -1339,23 +1607,16 @@ function start(browser) {
         });
     };
     self.download = function(message, sender, sendResponse) {
-        chrome.downloads.download({ url: message.url, saveAs: message.saveAs });
-    };
-    self.executeScript = function(message, sender, sendResponse) {
-        chrome.tabs.executeScript(sender.tab.id, {
-            frameId: sender.frameId,
-            code: message.code,
-            matchAboutBlank: true,
-            file: message.file
-        }, function(result) {
-            _response(message, sendResponse, {
-                response: result
-            });
+        chrome.downloads.download({
+            url: message.url,
+            filename: message.filename,
+            saveAs: message.saveAs
         });
     };
     self.tabURLAccessed = function(message, sender, sendResponse) {
         if (sender.tab) {
             var tabId = sender.tab.id;
+            _setScrollPos_bg(tabId);
             if (!tabURLs.hasOwnProperty(tabId)) {
                 tabURLs[tabId] = {};
             }
@@ -1450,7 +1711,11 @@ function start(browser) {
         var tabId = sender.tab.id;
         var zoomFactor = message.zoomFactor * message.repeats;
         if (zoomFactor == 0) {
-            chrome.tabs.setZoom(tabId, 1);
+            chrome.tabs.getZoomSettings(tabId, function(settings) {
+                const defaultZoom = settings.defaultZoomFactor ?
+                    settings.defaultZoomFactor : 1;
+                chrome.tabs.setZoom(tabId, defaultZoom);
+            });
         } else {
             chrome.tabs.getZoom(tabId, function(zf) {
                 chrome.tabs.setZoom(tabId, zf + zoomFactor);
@@ -1524,15 +1789,20 @@ function start(browser) {
         });
     };
     self.getCaptureSize = function(message, sender, sendResponse) {
-        var img = document.createElement( "img" );
-        img.onload = function() {
-            _response(message, sendResponse, {
-                width: img.width,
-                height: img.height
-            });
-        };
         chrome.tabs.captureVisibleTab(null, {format: "png"}, function(dataUrl) {
-            img.src = dataUrl;
+            fetch(dataUrl)
+                .then(function(res) {
+                    return res.blob();
+                })
+                .then(function(blob) {
+                    return createImageBitmap(blob);
+                })
+                .then(function(img) {
+                    _response(message, sendResponse, {
+                        width: img.width,
+                        height: img.height
+                    });
+                });
         });
     };
     self.deleteHistoryOlderThan = function(message, sender, sendResponse) {
@@ -1593,6 +1863,9 @@ function start(browser) {
             queueURLs: _queueURLs
         };
     };
+    self.clearQueueURLs = function(message, sender, sendResponse) {
+        _queueURLs = [];
+    };
 
     self.getVoices = function(message, sender, sendResponse) {
         chrome.tts.getVoices(function(voices) {
@@ -1642,24 +1915,70 @@ function start(browser) {
         return {requestHeaders: details.requestHeaders};
     }
 
-    self.setUserAgent = function (message, sender, sendResponse) {
-        if (message.userAgent) {
-            userAgent = message.userAgent;
-            chrome.webRequest.onBeforeSendHeaders.addListener(onBeforeSendHeaders, {
-                urls: ["<all_urls>"]
-            }, ["blocking", "requestHeaders"]);
-        } else {
-            chrome.webRequest.onBeforeSendHeaders.removeListener(onBeforeSendHeaders);
-        }
-        chrome.tabs.reload(sender.tab.id);
-    };
     self.writeClipboard = function (message, sender, sendResponse) {
         navigator.clipboard.writeText(message.text)
     };
     self.readClipboard = function (message, sender, sendResponse) {
         // only for Safari
-        chrome.runtime.sendNativeMessage("application.id", {message: "Clipboard.read"}, function(response) {
+        chrome.runtime.sendNativeMessage("application.id", {command: "Clipboard.read"}, function(response) {
             _response(message, sendResponse, response);
+        });
+    };
+    function toUTF8(str) {
+        try {
+            return decodeURIComponent(escape(str));
+        } catch {
+            return str;
+        }
+    }
+    let clientInLLMRequest = {tabId: 0, frameId: 0};
+    const sendLLMessage = (tabId, frameId, message) => {
+        if (browser.name === "Safari") {
+            chrome.runtime.sendMessage(message);
+        } else {
+            sendTabMessage(tabId, frameId, message);
+        }
+    };
+
+    self.llmRequest = function (message, sender, sendResponse) {
+        clientInLLMRequest.tabId = sender.tab.id;
+        clientInLLMRequest.frameId = sender.frameId;
+
+        const decoder = new TextDecoder();
+
+        const provider = message.provider;
+        if (llmClients.hasOwnProperty(provider)) {
+            const llmClient = llmClients[provider];
+            llmClient(message, {
+                onComplete: (message) => {
+                    if (message.content && message.content.constructor.name === "Array") {
+                        message.content = message.content.map((c) => {
+                            return c.type === "text" ? { type: "text", text: toUTF8(c.text) } : c;
+                        });
+                    }
+                    sendLLMessage(clientInLLMRequest.tabId, clientInLLMRequest.frameId, {
+                        subject: 'llmResponse',
+                        message,
+                        done: true
+                    });
+                },
+                onChunk: (chunk) => {
+                    sendLLMessage(clientInLLMRequest.tabId, clientInLLMRequest.frameId, {
+                        subject: 'llmResponse',
+                        chunk: toUTF8(chunk)
+                    });
+                },
+            });
+        } else {
+            sendLLMessage(clientInLLMRequest.tabId, clientInLLMRequest.frameId, {
+                subject: 'llmResponse',
+                chunk: `**Warning:** There is no LLM provider ${provider} implemented.`
+            });
+        }
+    };
+    self.getAllLlmProviders = function (message, sender, sendResponse) {
+        _response(message, sendResponse, {
+            providers: Object.keys(llmClients)
         });
     };
 
@@ -1667,7 +1986,7 @@ function start(browser) {
     chrome.runtime.setUninstallURL("http://brookhong.github.io/2018/01/30/why-did-you-uninstall-surfingkeys.html");
 
     self.connectNative = function (message, sender, sendResponse) {
-        if (browser.nvimServer) {
+        if (browser.nvimServer && browser.nvimServer.instance) {
             browser.nvimServer.instance.then(({url, nm}) => {
                 nm.postMessage({
                     mode: message.mode

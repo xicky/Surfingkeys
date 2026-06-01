@@ -2,9 +2,9 @@
 
 [![Node CI](https://github.com/brookhong/Surfingkeys/workflows/Node%20CI/badge.svg?branch=master)](https://github.com/brookhong/Surfingkeys/actions?query=workflow%3A%22Node+CI%22+branch%3Amaster)
 
-Surfingkeys is another web browser(including Google Chrome, Chromium based browsers, Firefox, Safari) extension that provides keyboard-based navigation and control of the web in the spirit of the VIM editor. But it's not for VIM users only, it's for anyone who just needs some more shortcuts to his/her own functions.
+Surfingkeys is another web browser(including Google Chrome, Chromium based browsers, Firefox, Safari) extension that provides keyboard-based navigation and control of the web in the spirit of the VIM editor. But it's not for VIM users only, it's for anyone who just needs some more shortcuts to their own functions.
 
-Surfingkeys is created with all settings described in Javascript, so it's easy for anyone to map any keystrokes to his/her own defined Javascript function. For example,
+Surfingkeys is created with all settings described in Javascript, so it's easy for anyone to map any keystrokes to their own defined Javascript function. For example,
 
     api.mapkey('<Ctrl-y>', 'Show me the money', function() {
         api.Front.showPopup('a well-known phrase uttered by characters in the 1996 film Jerry Maguire (Escape to close).');
@@ -41,6 +41,7 @@ Surfingkeys is doing its best to make full use of keyboard for web browsing, but
 | Capture page | Y | Y | Y |
 | PDF viewer | Y | N | N |
 | Sync across devices | Y | N | Y |
+| Tab Groups | Y | Y | N |
 | Proxy | Y | N | N |
 | Markdown preview |Y  | Y | N |
 
@@ -86,6 +87,8 @@ Surfingkeys is doing its best to make full use of keyboard for web browsing, but
 * Emoji completion in Insert mode
 * Rich hints for keystroke
 * Everything in Surfingkeys works for PDF
+* Regional Hints mode
+* Chat with LLM
 
 ## Quick start
 
@@ -105,18 +108,6 @@ Try some mappings described in the usage popover. For example, press `e` to scro
 ![visual](https://cloud.githubusercontent.com/assets/288207/16182120/1cc536da-36d5-11e6-9e08-293cdb8fbcd2.png)
 * `T` to switch tabs
 ![tabs](https://cloud.githubusercontent.com/assets/288207/10328839/f0143ffe-6ceb-11e5-8eee-962db94b2c22.png)
-
-## Follow links
-
-Default hint characters for links are `asdfgqwertzxcvb`, it quits when a non-hint key is pressed. Add below line to your settings to make it right hand:
-
-    api.Hints.setCharacters('yuiophjklnm'); // for right hand
-
-When hints are overlapped, press `Shift` to flip them. Hold `space` to hold hints temporarily, release `space` to restore hints.
-
-Hints are placed in center of target links, you could add below line in your settings to let them aligned left.
-
-    settings.hintAlign = "left";
 
 ## Surfingkeys modes
 
@@ -151,6 +142,32 @@ All mappings added with `vmapkey` work in this mode, with some built-in mappings
 * `;` repeat latest f, F.
 * `,` repeat latest f, F in opposite direction.
 
+### Hints mode
+
+Press `f` to enter Hints mode to follow links. There are several other keystrokes to enter Hints mode with some different behavior, such as `cf` for continuous following, `af` for active following.
+
+Default hint characters for links are `asdfgqwertzxcvb`, it quits when a non-hint key is pressed. Add below line to your settings to make it right hand:
+
+    api.Hints.setCharacters('yuiophjklnm'); // for right hand
+
+When hints are overlapped, press `Shift` to flip them. Hold `space` to hold hints temporarily, release `space` to restore hints.
+
+Hints are placed in center of target links, you could add below line in your settings to let them aligned left.
+
+    settings.hintAlign = "left";
+
+#### Regional Hints mode
+
+Press `L` to enter regional Hints mode by picking a visually large element. There are some built-in actions in regional Hints mode,
+
+* `Esc` to exit regional hints mode
+* `ct` to copy text from target element
+* `ch` to copy HTML from target element
+* `d` to delete target element
+* `l` to chat with AI about the text of the element
+
+[Demo on YouTube](https://www.youtube.com/watch?v=pFPOzAZDO38)
+
 ### Insert mode
 
 When focus is switched into any editable element by whatever means(`i` hints or `f` hints or mouse click), Insert mode is on.
@@ -160,7 +177,7 @@ All mappings added with `imapkey` work in this mode.
 * `Ctrl - i` to open vim editor to edit.
 * `Ctrl - '` to toggle quotes in an input element, this is useful for search engines like google.
 * `Ctrl-e` move the cursor to the end of the line.
-* `Ctrl-f` move the cursor to the beginning of the line.
+* `Ctrl-a` move the cursor to the beginning of the line, use `Ctrl-f` in Windows to avoid conflict with select all.
 * `Ctrl-u` delete all entered characters before the cursor.
 * `Alt-b` move the cursor Backward 1 word.
 * `Alt-f` move the cursor Forward 1 word.
@@ -186,7 +203,7 @@ If you'd like emoji suggestions popup as soon as you input colon, use below:
 
     settings.startToShowEmoji = 0;
 
-[Complete list of Emoji](https://github.com/brookhong/Surfingkeys/blob/master/pages/emoji.tsv)
+[Complete list of Emoji](https://github.com/brookhong/Surfingkeys/blob/master/src/pages/emoji.tsv)
 
 ### Find
 
@@ -282,9 +299,11 @@ This is very useful for those pages you access very frequently. `om` to check ou
 
 By default, pressing `T` will show all opened tabs in an overlay, then pressing the hint char, will switch to the related tab.
 
-![tabs_overlay](https://cloud.githubusercontent.com/assets/288207/10544636/245447f6-7457-11e5-8372-62b8f6337158.png)
+![tabs_overlay](https://github.com/brookhong/Surfingkeys/assets/288207/f0ca339d-133f-4fb0-b902-cdc64fc71374)
 
-There is `settings.tabsThreshold` here. When total of opened tabs exceeds `settings.tabsThreshold`, omnibar will be used for choosing tabs.
+If there is no hint label matched with your pressing, omnibar will be opened. So you can always press a non-hint character such as `;` or `j` to launch omnibar directly from the tabs overlay.
+
+There is also `settings.tabsThreshold` here. When total of opened tabs exceeds `settings.tabsThreshold`, omnibar will be used for choosing tabs.
 
 ![tabs_omnibar](https://cloud.githubusercontent.com/assets/288207/10544630/1fbdd02c-7457-11e5-823c-14411311c315.png)
 
@@ -407,17 +426,11 @@ To avoid manually editing PAC script and reloading/switching profile by clicking
 * setProxyMode, to set proxy mode, there are five modes: direct, byhost, bypass, always, system and clear.
 
         direct      Chrome will connect to all sites directly.
-        byhost      Chrome will only connect to sites added by `addProxySite` through related proxy. You could add multiple pairs of `proxy` and `hosts`, for hosts matched with `hosts` `proxy` will be used.
+        byhost      Chrome will only connect to sites added in settings through related proxy. You could add multiple pairs of `proxy` and `hosts`, for hosts matched with `hosts` `proxy` will be used.
         bypass      Chrome will connect to all sites through proxy, with specified hosts excluded.
         always      Chrome will connect to all sites through proxy.
         system      Use proxy configuration taken from the operating system.
         clear       Surfingkeys will not take control of proxy settings, this is the default mode.
-
-* addProxySite, removeProxySite, toggleProxySite, to make Chrome connect to site through proxy or not, examples:
-
-        addProxySite google.com,facebook.com,twitter.com
-
-* proxyInfo, to list proxy you set by `setProxy`, proxy mode you set by `setProxyMode` and sites you add/remove by `addProxySite`/`removeProxySite`/`toggleProxySite`.
 
 * `cp`, toggle proxy for current site.
 
@@ -542,6 +555,7 @@ Some functionalities are also available when you're using original pdf viewer, b
 | settings.omnibarSuggestionTimeout | 200 | Timeout duration before Omnibar suggestion URLs are queried, in milliseconds. Helps prevent unnecessary HTTP requests and API rate-limiting. |
 | settings.focusFirstCandidate | false | Whether to focus first candidate of matched result in Omnibar. |
 | settings.tabsThreshold | 100 | When total of opened tabs exceeds the number, Omnibar will be used for choosing tabs. |
+| settings.verticalTabs | true | Whether to show tab pickers vertically aligned. |
 | settings.clickableSelector | "" | Extra CSS selector to pick elements for hints mode, such as "\*.jfk-button, \*.goog-flat-menu-button". |
 | settings.clickablePat | /(https?&#124;thunder&#124;magnet):\/\/\S+/ig | A regex to detect clickable links from text, you could use `O` to open them. |
 | settings.editableSelector | div.CodeMirror-scroll,div.ace_content | CSS selector for additional editable elements. |
@@ -549,6 +563,7 @@ Some functionalities are also available when you're using original pdf viewer, b
 | settings.modeAfterYank | "" | Which mode to fall back after yanking text in visual mode. Value could be one of ["", "Caret", "Normal"], default is "", which means no action after yank.|
 | settings.scrollStepSize | 70 | A step size for each move by `j`/`k` |
 | settings.scrollFriction | 0 | A force that is needed to start continuous scrolling after initial scroll step. A bigger number will cause a flicker after initial step, but help to keep the first step precise. |
+| settings.scrollFallback | false | Fallback to document-level scrolling when the focused element cannot scroll in the requested direction. |
 | settings.nextLinkRegex | /((>>&#124;next)+)/i | A regex to match links that indicate next page. |
 | settings.prevLinkRegex | /((<<&#124;prev(ious)?)+)/i| A regex to match links that indicate previous page. |
 | settings.hintAlign | "center" | Alignment of hints on their target elements. ["left", "center", "right"] |
@@ -557,14 +572,14 @@ Some functionalities are also available when you're using original pdf viewer, b
 | settings.defaultSearchEngine | "g" | The default search engine used in Omnibar. |
 | settings.blocklistPattern | undefined | A regex to match the sites that will have Surfingkeys disabled. |
 | settings.focusAfterClosed | "right" | Which tab will be focused after the current tab is closed. ["left", "right", "last"] |
-| settings.repeatThreshold | 99 | The maximum of actions to be repeated. |
+| settings.repeatThreshold | 9 | The maximum of actions to be repeated. |
 | settings.tabsMRUOrder | true | Whether to list opened tabs in order of most recently used beneath Omnibar. |
 | settings.historyMUOrder | true | Whether to list history in order of most used beneath Omnibar. |
 | settings.newTabPosition | 'default' | Where to new tab. ["left", "right", "first", "last", "default"] |
 | settings.interceptedErrors | [] | Indicates for which errors Surfingkeys will show error page, so that you could use Surfingkeys on those error pages. For example, ["*"] to show error page for all errors, or ["net::ERR_NAME_NOT_RESOLVED"] to show error page only for ERR_NAME_NOT_RESOLVED, please refer to [net_error_list.h](https://github.com/adobe/chromium/blob/master/net/base/net_error_list.h) for complete error list.  |
 | settings.enableEmojiInsertion | false | Whether to turn on Emoji completion in Insert mode. |
 | settings.startToShowEmoji | 2 | How many characters are needed after colon to show emoji suggestion. |
-| settings.language | undefined | The language of the usage popover, only "zh-CN" is added for now, PR for any other language is welcomed, please see [l10n.json](https://github.com/brookhong/Surfingkeys/blob/master/pages/l108.json). |
+| settings.language | undefined | The language of the usage popover, only "zh-CN" and "ru-RU" are added for now, PR for any other language is welcomed, please see [l10n.json](https://github.com/brookhong/Surfingkeys/blob/master/src/pages/l10n.json). |
 | settings.stealFocusOnLoad | true | Whether to prevent focus on input on page loaded, set to true by default so that we could use Surfingkeys directly after page loaded, otherwise we need press `Esc` to quit input. |
 | settings.enableAutoFocus | true | Whether to enable auto focus after mouse click on some widget. This is different with `stealFocusOnLoad`, which is only for the time of page loaded. For example, there is a hidden input box on a page, it is turned to visible after user clicks on some other link. If you don't like the input to be focused when it's turned to visible, you could set this to false. |
 | settings.theme | undefined | To change css of the Surfingkeys UI elements. |
@@ -578,6 +593,9 @@ Some functionalities are also available when you're using original pdf viewer, b
 | settings.caretViewport | null | Set it in format `[top, left, bottom, right]` to limit hints generation on `v` for entering visual mode, such as `[window.innerHeight / 2 - 10, 0, window.innerHeight / 2 + 10, window.innerWidth]` will make Surfingkeys generate Hints only for text that display on vertically middle of window. |
 | settings.mouseSelectToQuery | [] | All hosts that have enable feature -- mouse selection to query. |
 | settings.autoSpeakOnInlineQuery | false | Whether to automatically speak the query string with TTS on inline query. |
+| settings.showTabIndices | false | Whether to show tab numbers (indices) in the tab titles. |
+| settings.tabIndicesSeparator | "\|" | The separator between index and original title of a tab. |
+| settings.disabledOnActiveElementPattern | undefined | Automatically disable this extension when the active element matches with this pattern and reactivate the extension when the active element changes, one useful case is to enable user to type to locate an option in a large dropdown, such as `settings.disabledOnActiveElementPattern = "ul.select-dropdown-options";` |
 
 ### Example of settings.theme, below is to set font size of status bar
 
@@ -586,6 +604,72 @@ Some functionalities are also available when you're using original pdf viewer, b
             font-size: 20pt;
         }
     }`;
+
+## Chat with LLM
+There are several LLM providers integrated into Surfingkeys now, use `A` to call out a chat popup, and chat with your AI providers. The supported LLM providers now are
+
+* Ollama
+* Bedrock
+* DeepSeek
+* Gemini
+* Custom LLM provider (e.g.: SiliconFlow and OpenRouter; other OpenAI API compatible services should also work)
+
+To use the feature, you need set up your credentials/API keys first, like
+
+    settings.defaultLLMProvider = "bedrock";
+    settings.llm = {
+        bedrock: {
+            accessKeyId: '********************',
+            secretAccessKey: '****************************************',
+            // model: 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+            model: 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+        },
+        gemini: {
+            apiKey: '***************************************',
+        },
+        ollama: {
+            model: 'qwen2.5-coder:32b',
+        },
+        deepseek: {
+            apiKey: '***********************************',
+            model: 'deepseek-chat',
+        },
+        custom: {
+            serviceUrl: 'https://api.siliconflow.cn/v1/chat/completions',
+            apiKey: '***********************************',
+            model: 'deepseek-ai/DeepSeek-V3.1',
+        }
+    };
+
+You can also use `A` in visual mode. Press `v` or `V` to enter visual mode, then `v` again to select the text you'd like to chat with AI about, then `A` to call out the LLM chat box. Now start to chat with AI about the selected text.
+
+Another solution to select the content to chat with AI about is Regional Hints mode. Press `L` to pick an element, then `l` to call out the LLM chat box.
+
+### To use LLM chat with specified system prompt
+
+For example, you can designate your AI to be a translator with below snippets
+
+    api.mapkey('A', '#8Open llm chat', function() {
+        api.Front.openOmnibar({type: "LLMChat", extra: {
+            system: "You're a translator, whenever you got a message in Chinese, please just translate it into English, and if you got a message in English, please translate it to Chinese. You don't need to answer any question, just TRANSLATE."
+        }});
+    });
+
+### 403 Forbidden with Ollama
+
+To use Ollama with Chrome extension, you need run ollama with some modification on `OLLAMA_ORIGINS`
+
+Under Windows
+
+    OLLAMA_ORIGINS=chrome-extension://* ollama serve
+
+Under Mac
+
+    launchctl setenv OLLAMA_ORIGINS chrome-extension://gfbliohnnapiefjpjlpjnehglfpaknnc
+
+Under Mac for both Chrome and Firefox
+
+    launchctl setenv OLLAMA_ORIGINS "chrome-extension://gfbliohnnapiefjpjlpjnehglfpaknnc,moz-extension://*"
 
 ## API Documentation
 

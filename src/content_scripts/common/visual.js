@@ -1,5 +1,5 @@
 import Trie from './trie';
-import { dispatchSKEvent, runtime } from './runtime.js';
+import { RUNTIME, dispatchSKEvent, runtime } from './runtime.js';
 import Mode from './mode';
 import KeyboardUtils from './keyboardUtils';
 import {
@@ -12,6 +12,7 @@ import {
     getTextRect,
     getVisibleElements,
     getWordUnderCursor,
+    locateFocusNode,
     scrollIntoViewIfNeeded,
     setSanitizedContent,
     tabOpenLink,
@@ -58,6 +59,15 @@ function createVisual(clipboard, hints) {
                 event.sk_suppressed = true;
             }
         }
+    });
+    self.addEventListener('scroll', function(event) {
+        matches.forEach(function(m) {
+            const r = getTextRect(m[0], m[1])[0];
+            m[2].forEach((mi) => {
+                mi.style.left = document.scrollingElement.scrollLeft + r.left + 'px';
+                mi.style.top = document.scrollingElement.scrollTop + r.top + 'px';
+            });
+        });
     });
 
     self.addEventListener('click', function(event) {
@@ -189,7 +199,7 @@ function createVisual(clipboard, hints) {
             }
             if (matches.length) {
                 currentOccurrence = matches.length - 1;
-                dispatchSKEvent('showStatus', [2, currentOccurrence + 1 + ' / ' + matches.length]);
+                dispatchSKEvent("front", ['showStatus', [undefined, undefined, currentOccurrence + 1 + ' / ' + matches.length]]);
             }
         }
     });
@@ -203,7 +213,7 @@ function createVisual(clipboard, hints) {
             document.scrollingElement.scrollTop = 0;
             currentOccurrence = 0;
             if (matches.length) {
-                dispatchSKEvent('showStatus', [2, currentOccurrence + 1 + ' / ' + matches.length]);
+                dispatchSKEvent("front", ['showStatus', [undefined, undefined, currentOccurrence + 1 + ' / ' + matches.length]]);
             }
 
             if (getBrowserName() !== "Firefox") {
@@ -239,7 +249,6 @@ function createVisual(clipboard, hints) {
             // sentence and paragraphboundary not support in firefox
             // document.getSelection().modify("move", "backward", "paragraphboundary")
             // gets 0x80004001 (NS_ERROR_NOT_IMPLEMENTED)
-            selection.modify("move", "backward", unit);
             selection.modify("extend", "forward", unit);
         }
     }
@@ -281,7 +290,7 @@ function createVisual(clipboard, hints) {
     });
     function clickLink(element, shiftKey) {
         flashPressedLink(element, () => {
-            dispatchMouseEvent(element, ['click'], shiftKey);
+            dispatchMouseEvent(element, ['click'], {shiftKey});
         });
     }
     self.mappings.add(KeyboardUtils.encodeKeystroke("<Enter>"), {
@@ -456,7 +465,7 @@ function createVisual(clipboard, hints) {
     self.hideCursor = function () {
         if (document.body.contains(cursor)) {
             cursor.remove();
-            dispatchSKEvent('cursorHidden');
+            dispatchSKEvent("front", ['hideBubble']);
         }
     };
 
@@ -464,27 +473,11 @@ function createVisual(clipboard, hints) {
         if (selection.focusNode && (selection.focusNode.offsetHeight > 0 || selection.focusNode.parentNode.offsetHeight > 0)) {
             // https://developer.mozilla.org/en-US/docs/Web/API/Selection
             // If focusNode is a text node, this is the number of characters within focusNode preceding the focus. If focusNode is an element, this is the number of child nodes of the focusNode preceding the focus.
-            scrollIntoViewIfNeeded(selection.focusNode.parentElement, true);
-
-            var r = getTextRect(selection.focusNode, selection.focusOffset)[0];
-            if (!r) {
-                r = selection.focusNode.getBoundingClientRect();
-            }
+            let r = locateFocusNode(selection)
             if (r) {
                 cursor.style.position = "fixed";
                 cursor.style.left = r.left + 'px';
-                if (r.left < 0 || r.left >= window.innerWidth) {
-                    document.scrollingElement.scrollLeft += r.left - window.innerWidth / 2;
-                    cursor.style.left = window.innerWidth / 2 + 'px';
-                } else {
-                    cursor.style.left = r.left + 'px';
-                }
-                if (r.top < 0 || r.top >= window.innerHeight) {
-                    document.scrollingElement.scrollTop += r.top - window.innerHeight / 2;
-                    cursor.style.top = window.innerHeight / 2 + 'px';
-                } else {
-                    cursor.style.top = r.top + 'px';
-                }
+                cursor.style.top = r.top + 'px';
                 cursor.style.height = r.height + 'px';
             }
 
@@ -557,12 +550,13 @@ function createVisual(clipboard, hints) {
     }
 
     function highlight(pattern) {
+        const gpattern = new RegExp(pattern.source, "g" + pattern.flags);
         getTextNodes(document.body, pattern).forEach(function(node) {
             var mtches;
-            while ((mtches = pattern.exec(node.data)) !== null) {
+            while ((mtches = gpattern.exec(node.data)) !== null) {
                 var match = mtches[0];
                 if (match.length) {
-                    var pos = pattern.lastIndex - match.length;
+                    var pos = gpattern.lastIndex - match.length;
                     createMatchMark(node, pos, node, pos + match.length);
                 } else {
                     // matches like \b
@@ -570,14 +564,6 @@ function createVisual(clipboard, hints) {
                 }
             }
         });
-        var scrollTop = document.scrollingElement.scrollTop;
-        selection.setPosition(null, 0);
-        while (findNextTextNodeBy(pattern.source, pattern.flags.indexOf('i') === -1, false)) {
-            if (selection.anchorNode !== selection.focusNode) {
-                createMatchMark(selection.anchorNode, selection.anchorOffset, selection.focusNode, selection.focusOffset);
-            }
-        }
-        document.scrollingElement.scrollTop = scrollTop;
         if (matches.length) {
             currentOccurrence = 0;
             for (var i = 0; i < matches.length; i++) {
@@ -587,7 +573,7 @@ function createVisual(clipboard, hints) {
                     break;
                 }
             }
-            dispatchSKEvent('showStatus', [2, currentOccurrence + 1 + ' / ' + matches.length]);
+            dispatchSKEvent("front", ['showStatus', [undefined, undefined, currentOccurrence + 1 + ' / ' + matches.length]]);
         }
     }
 
@@ -595,31 +581,21 @@ function createVisual(clipboard, hints) {
         clearSelectionMark();
         self.hideCursor();
         matches = [];
-        registeredScrollNodes.forEach(function(n) {
-            n.onscroll = null;
-        });
-        registeredScrollNodes = [];
         setSanitizedContent(markHolder_, "");
         markHolder_.remove();
-        dispatchSKEvent('showStatus', [2, '']);
+        dispatchSKEvent("front", ['showStatus', [undefined, undefined, ""]]);
     };
 
     self.emptySelection = function() {
         document.getSelection().empty();
     };
 
-    function onCursorHiden() {
-        dispatchSKEvent('hideBubble');
-    }
-
     self.onEnter = function() {
-        document.addEventListener('surfingkeys:cursorHidden', onCursorHiden);
         _incState();
     };
 
     self.onExit = function() {
         self.visualClear();
-        document.removeEventListener('surfingkeys:cursorHidden', onCursorHiden);
     };
 
     function _onStateChange() {
@@ -677,9 +653,9 @@ function createVisual(clipboard, hints) {
             if (query.length && query !== ".") {
                 self.hideCursor();
                 var pos = [selection.focusNode, selection.focusOffset];
-                runtime.updateHistory('find', query);
+                RUNTIME('updateInputHistory', { find: query });
                 self.visualClear();
-                highlight(new RegExp(query, "g" + (runtime.getCaseSensitive(query) ? "" : "i")));
+                highlight(new RegExp(query, runtime.getCaseSensitive(query) ? "" : "i"));
                 selection.setPosition(pos[0], pos[1]);
                 self.showCursor();
             }
@@ -694,9 +670,9 @@ function createVisual(clipboard, hints) {
             }
             currentOccurrence = (backward ? (matches.length + currentOccurrence - 1) : (currentOccurrence + 1)) % matches.length;
             select(matches[currentOccurrence]);
-            dispatchSKEvent('showStatus', [2, currentOccurrence + 1 + ' / ' + matches.length]);
+            dispatchSKEvent("front", ['showStatus', [undefined, undefined, currentOccurrence + 1 + ' / ' + matches.length]]);
         } else if (runtime.conf.lastQuery) {
-            highlight(new RegExp(runtime.conf.lastQuery, "g" + (runtime.getCaseSensitive(runtime.conf.lastQuery) ? "" : "i")));
+            highlight(new RegExp(runtime.conf.lastQuery, runtime.getCaseSensitive(runtime.conf.lastQuery) ? "" : "i"));
             self.visualEnter(runtime.conf.lastQuery);
         }
     };
@@ -761,33 +737,18 @@ function createVisual(clipboard, hints) {
 
     };
 
-    var registeredScrollNodes = [];
     self.visualEnter = function (query) {
         if (query.length === 0 || query === ".") {
             return;
         }
         self.visualClear();
-        highlight(new RegExp(query, "g" + (runtime.getCaseSensitive(query) ? "" : "i")));
+        highlight(new RegExp(query, runtime.getCaseSensitive(query) ? "" : "i"));
         if (matches.length) {
             self.enter();
             select(matches[currentOccurrence]);
         } else {
-            dispatchSKEvent('showStatus', [2, "Pattern not found: {0}".format(query), 1000]);
+            dispatchSKEvent("front", ['showStatus', [undefined, undefined, "Pattern not found: {0}".format(query)], 1000]);
         }
-        Mode.getScrollableElements().forEach(function(n) {
-            if (n !== document.scrollingElement) {
-                n.onscroll = function() {
-                    matches.forEach(function(m) {
-                        var r = getTextRect(m[0], m[1])[0];
-                        m[2].forEach((mi) => {
-                            mi.style.left = document.scrollingElement.scrollLeft + r.left + 'px';
-                            mi.style.top = document.scrollingElement.scrollTop + r.top + 'px';
-                        });
-                    });
-                };
-                registeredScrollNodes.push(n);
-            }
-        });
     };
 
     self.findSentenceOf = function (query) {
